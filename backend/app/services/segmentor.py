@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 import os
 
 import numpy as np
@@ -11,6 +11,19 @@ def segment_tumor(
     sample_mask_path: str = None,
     modality_volumes: Optional[Dict[str, np.ndarray]] = None,
 ) -> np.ndarray:
+    mask, _ = segment_tumor_with_info(
+        volume=volume,
+        sample_mask_path=sample_mask_path,
+        modality_volumes=modality_volumes,
+    )
+    return mask
+
+
+def segment_tumor_with_info(
+    volume: np.ndarray,
+    sample_mask_path: str = None,
+    modality_volumes: Optional[Dict[str, np.ndarray]] = None,
+) -> Tuple[np.ndarray, str]:
     """
     Segment tumor from a 3D brain volume.
     
@@ -23,14 +36,14 @@ def segment_tumor(
         print("[Segmentor] Loading pre-computed segmentation mask...")
         mask = np.load(sample_mask_path)
         print(f"[Segmentor] Mask loaded: shape={mask.shape}, tumor voxels={np.sum(mask)}")
-        return mask
+        return mask, "presegmented_mask"
 
     model_mask = _run_monai_inference(volume, modality_volumes=modality_volumes)
     if model_mask is not None:
-        return model_mask
+        return model_mask, "model_inference"
 
     print("[Segmentor] Running heuristic fallback segmentation...")
-    return _run_model_inference(volume)
+    return _run_model_inference(volume), "heuristic_fallback"
 
 
 def _run_model_inference(volume: np.ndarray) -> np.ndarray:
@@ -74,12 +87,13 @@ def _run_monai_inference(
 
     try:
         import torch
-        from monai.networks.nets import UNet
+        from monai.networks.nets import SwinUNETR, UNet
     except ImportError:
         print("[Segmentor] MONAI/Torch not installed, skipping model inference")
         return None
 
     model_mode = os.getenv("NEUROLENS_MODEL_MODE", "single").lower()
+    model_arch = os.getenv("NEUROLENS_MODEL_ARCH", "unet").lower()
     channel_order = ["flair", "t1", "t1ce", "t2"]
 
     if model_mode == "brats":
@@ -93,16 +107,25 @@ def _run_monai_inference(
         in_channels = 1
         input_array = np.expand_dims(volume, axis=0)
 
-    print(f"[Segmentor] Running MONAI inference with model: {model_path} ({model_mode})")
+    print(f"[Segmentor] Running MONAI inference with model: {model_path} ({model_mode}, {model_arch})")
 
-    model = UNet(
-        spatial_dims=3,
-        in_channels=in_channels,
-        out_channels=1,
-        channels=(16, 32, 64, 128),
-        strides=(2, 2, 2),
-        num_res_units=2,
-    )
+    if model_arch == "swinunetr":
+        model = SwinUNETR(
+            in_channels=in_channels,
+            out_channels=1,
+            feature_size=int(os.getenv("NEUROLENS_SWIN_FEATURE_SIZE", "24")),
+            use_checkpoint=False,
+            spatial_dims=3,
+        )
+    else:
+        model = UNet(
+            spatial_dims=3,
+            in_channels=in_channels,
+            out_channels=1,
+            channels=(16, 32, 64, 128),
+            strides=(2, 2, 2),
+            num_res_units=2,
+        )
     state_dict = torch.load(model_path, map_location="cpu")
     model.load_state_dict(state_dict)
     model.eval()
@@ -119,11 +142,13 @@ def _run_monai_inference(
 def get_model_status() -> dict:
     model_path = os.getenv("NEUROLENS_MODEL_PATH")
     model_mode = os.getenv("NEUROLENS_MODEL_MODE", "single").lower()
+    model_arch = os.getenv("NEUROLENS_MODEL_ARCH", "unet").lower()
     return {
         "configured": bool(model_path),
         "exists": bool(model_path and os.path.exists(model_path)),
         "path": model_path,
         "mode": model_mode,
+        "arch": model_arch,
     }
 
 

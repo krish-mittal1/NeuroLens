@@ -14,12 +14,13 @@ from fastapi.responses import JSONResponse
 
 from app.services.brats_loader import list_brats_cases, load_brats_case
 from app.services.dicom_loader import load_volume_from_input, load_volume_from_npy
+from app.services.evaluator import evaluate_segmentation
 from app.services.explainer import generate_reasoning
 from app.services.mesh_builder import build_brain_mesh, build_mesh
 from app.services.metrics import extract_metrics
 from app.services.postprocessor import postprocess_mask
 from app.services.sample_data import ensure_sample_dataset
-from app.services.segmentor import get_model_status, load_mask_from_path, segment_tumor
+from app.services.segmentor import get_model_status, load_mask_from_path, segment_tumor, segment_tumor_with_info
 
 router = APIRouter()
 
@@ -41,15 +42,13 @@ def _build_analysis_response(
     print("\n[Pipeline Step 2/6] Segmenting tumor...")
     if force_model_inference:
         print("  Forcing MONAI/model inference path")
-        mask = segment_tumor(volume, modality_volumes=modality_volumes)
-        segmentation_mode = "model_inference"
+        mask, segmentation_mode = segment_tumor_with_info(volume, modality_volumes=modality_volumes)
     elif mask_path and os.path.exists(mask_path):
         print("  Using bundled or uploaded pre-segmented mask")
         mask = load_mask_from_path(mask_path)
         segmentation_mode = "presegmented_mask"
     else:
-        mask = segment_tumor(volume, modality_volumes=modality_volumes)
-        segmentation_mode = "heuristic_fallback"
+        mask, segmentation_mode = segment_tumor_with_info(volume, modality_volumes=modality_volumes)
 
     print("\n[Pipeline Step 3/6] Post-processing mask...")
     clean_mask = postprocess_mask(mask)
@@ -236,3 +235,40 @@ async def brats_analysis(case_id: str, modality: str = "flair", source: str = "g
 @router.get("/model-status")
 async def model_status():
     return {"status": "success", "model": get_model_status()}
+
+
+@router.get("/brats-evaluate/{case_id}")
+async def brats_evaluate(case_id: str, modality: str = "flair", source: str = "model"):
+    """
+    Evaluate a predicted segmentation against the BraTS ground-truth segmentation.
+    source=model uses MONAI/heuristic path, source=ground_truth should score ~1.0.
+    """
+    try:
+        case_data = load_brats_case(case_id, preferred_modality=modality)
+        ground_truth_path = case_data.get("mask_path")
+        if not ground_truth_path:
+            raise HTTPException(status_code=400, detail="No ground-truth segmentation found for this BraTS case")
+
+        ground_truth = load_mask_from_path(ground_truth_path)
+        if source.lower() == "ground_truth":
+            predicted = ground_truth
+            prediction_mode = "ground_truth"
+        else:
+            predicted, prediction_mode = segment_tumor_with_info(
+                case_data["volume"],
+                modality_volumes=case_data.get("modality_volumes"),
+            )
+
+        evaluation = evaluate_segmentation(predicted, ground_truth)
+        return {
+            "status": "success",
+            "case_id": case_id,
+            "modality": modality,
+            "source": source,
+            "prediction_mode": prediction_mode,
+            "evaluation": evaluation,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"BraTS evaluation failed: {str(exc)}")
