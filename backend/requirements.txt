@@ -11,3 +11,4 @@ pydicom
 # Model inference (SwinUNETR)
 torch
 monai
+Pillow

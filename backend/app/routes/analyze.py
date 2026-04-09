@@ -10,7 +10,7 @@ import shutil
 import uuid
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from app.services.brats_loader import list_brats_cases, load_brats_case
 from app.services.dicom_loader import load_volume_from_input, load_volume_from_npy
@@ -21,6 +21,7 @@ from app.services.metrics import extract_metrics
 from app.services.postprocessor import postprocess_mask
 from app.services.sample_data import ensure_sample_dataset
 from app.services.segmentor import get_model_status, load_mask_from_path, segment_tumor, segment_tumor_with_info
+from app.services.slice_server import store_slice_data, get_slice_info, render_slice
 
 router = APIRouter()
 
@@ -52,6 +53,9 @@ def _build_analysis_response(
 
     print("\n[Pipeline Step 3/6] Post-processing mask...")
     clean_mask = postprocess_mask(mask)
+
+    # Store volume + mask for the 2D slice viewer
+    store_slice_data(volume, clean_mask)
 
     print("\n[Pipeline Step 4/6] Generating 3D meshes...")
     tumor_mesh = build_mesh(
@@ -99,6 +103,7 @@ def _build_analysis_response(
             "depth": f"{metrics['depth_mm']:.1f} mm",
             "risk_level": metrics["risk_level"],
         },
+        "slice_info": get_slice_info(),
     }
 
     print("\n" + "=" * 60)
@@ -274,3 +279,30 @@ async def brats_evaluate(case_id: str, modality: str = "flair", source: str = "m
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"BraTS evaluation failed: {str(exc)}")
+
+
+# ─── Slice Viewer Endpoints ──────────────────────────────────────
+
+@router.get("/slice-info")
+async def slice_info():
+    """Return dimensions of the stored volume for the slice viewer."""
+    info = get_slice_info()
+    if info is None:
+        raise HTTPException(status_code=404, detail="No analysis data available. Run an analysis first.")
+    return info
+
+
+@router.get("/slices/{axis}/{index}")
+async def get_slice(axis: str, index: int):
+    """
+    Return a PNG image of a single 2D slice.
+    axis: axial | coronal | sagittal
+    index: slice number
+    """
+    if axis not in ("axial", "coronal", "sagittal"):
+        raise HTTPException(status_code=400, detail="axis must be 'axial', 'coronal', or 'sagittal'")
+    try:
+        png_bytes = render_slice(axis, index)
+        return Response(content=png_bytes, media_type="image/png")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

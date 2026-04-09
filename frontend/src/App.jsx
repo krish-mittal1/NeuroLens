@@ -41,6 +41,8 @@ function Viewer({ tumorMeshUrl, brainMeshUrl }) {
   const tumorRef = useRef(null);
   const brainRef = useRef(null);
   const loaderRef = useRef(null);
+  const brainMaterialsRef = useRef(null);
+  const [brainMode, setBrainMode] = useState("solid");
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -146,12 +148,17 @@ function Viewer({ tumorMeshUrl, brainMeshUrl }) {
       roughness: 0.25, metalness: 0.05, emissive: 0x331111, emissiveIntensity: 0.3,
       depthWrite: true,
     });
-    const brainMaterial = new THREE.MeshPhysicalMaterial({
+    const brainSolid = new THREE.MeshPhysicalMaterial({
       color: 0x88ccff, transparent: true, opacity: 0.18,
       roughness: 0.3, metalness: 0.1, side: THREE.DoubleSide,
       emissive: 0x112244, emissiveIntensity: 0.2,
       depthWrite: false,
     });
+    const brainWireframe = new THREE.MeshBasicMaterial({
+      color: 0x66ddff, wireframe: true, transparent: true, opacity: 0.08,
+      depthWrite: false,
+    });
+    brainMaterialsRef.current = { solid: brainSolid, wireframe: brainWireframe };
 
     const frameObject = (object) => {
       if (!object) return;
@@ -167,7 +174,7 @@ function Viewer({ tumorMeshUrl, brainMeshUrl }) {
     let cancelled = false;
     Promise.all([
       loadObj(resolveAssetUrl(tumorMeshUrl), tumorMaterial, tumorRef, 2),
-      loadObj(resolveAssetUrl(brainMeshUrl), brainMaterial, brainRef, 1),
+      loadObj(resolveAssetUrl(brainMeshUrl), brainSolid, brainRef, 1),
     ]).then(([tumor]) => {
       if (!cancelled) frameObject(tumor);
     }).catch((error) => console.error("Failed to load mesh", error));
@@ -175,7 +182,51 @@ function Viewer({ tumorMeshUrl, brainMeshUrl }) {
     return () => { cancelled = true; };
   }, [tumorMeshUrl, brainMeshUrl]);
 
-  return <div className="viewer" ref={mountRef} />;
+  // Handle brain mode changes
+  useEffect(() => {
+    const brain = brainRef.current;
+    const mats = brainMaterialsRef.current;
+    if (!brain || !mats) return;
+
+    if (brainMode === "hidden") {
+      brain.visible = false;
+    } else {
+      brain.visible = true;
+      const mat = brainMode === "wireframe" ? mats.wireframe : mats.solid;
+      brain.traverse((child) => {
+        if (child.isMesh) child.material = mat;
+      });
+    }
+  }, [brainMode]);
+
+  return (
+    <div className="viewer-wrapper">
+      <div className="viewer" ref={mountRef} />
+      <div className="viewer-toolbar">
+        <button
+          className={`toolbar-btn ${brainMode === "solid" ? "active" : ""}`}
+          onClick={() => setBrainMode("solid")}
+          title="Solid brain"
+        >
+          Solid
+        </button>
+        <button
+          className={`toolbar-btn ${brainMode === "wireframe" ? "active" : ""}`}
+          onClick={() => setBrainMode("wireframe")}
+          title="Wireframe brain"
+        >
+          Wireframe
+        </button>
+        <button
+          className={`toolbar-btn ${brainMode === "hidden" ? "active" : ""}`}
+          onClick={() => setBrainMode("hidden")}
+          title="Hide brain"
+        >
+          Tumor Only
+        </button>
+      </div>
+    </div>
+  );
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -342,6 +393,100 @@ function UploadPage({
 /* ═══════════════════════════════════════════════════════
    RESULTS PAGE (3D Viewer + Stats)
    ═══════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════
+   2D SLICE VIEWER
+   ═══════════════════════════════════════════════════════ */
+function SliceViewer({ sliceInfo }) {
+  const [axis, setAxis] = useState("axial");
+  const [sliceIndex, setSliceIndex] = useState(0);
+  const [imgSrc, setImgSrc] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const debounceRef = useRef(null);
+
+  const maxSlice = sliceInfo ? (sliceInfo[axis] || 1) - 1 : 0;
+
+  // Reset slice index when axis changes
+  useEffect(() => {
+    const mid = Math.floor(maxSlice / 2);
+    setSliceIndex(mid);
+  }, [axis, maxSlice]);
+
+  // Fetch slice image with debounce
+  useEffect(() => {
+    if (!sliceInfo) return;
+
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setLoading(true);
+      const url = `${API_BASE}/api/slices/${axis}/${sliceIndex}`;
+      fetch(url)
+        .then((r) => {
+          if (!r.ok) throw new Error("Slice fetch failed");
+          return r.blob();
+        })
+        .then((blob) => {
+          setImgSrc(URL.createObjectURL(blob));
+          setLoading(false);
+        })
+        .catch(() => setLoading(false));
+    }, 50);
+
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [axis, sliceIndex, sliceInfo]);
+
+  if (!sliceInfo) return null;
+
+  return (
+    <div className="slice-viewer">
+      <div className="slice-header">
+        <h3>2D Slice Viewer</h3>
+        <div className="axis-tabs">
+          {["axial", "coronal", "sagittal"].map((a) => (
+            <button
+              key={a}
+              className={`axis-tab ${axis === a ? "active" : ""}`}
+              onClick={() => setAxis(a)}
+            >
+              {a.charAt(0).toUpperCase() + a.slice(1)}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="slice-display">
+        {imgSrc ? (
+          <img
+            src={imgSrc}
+            alt={`${axis} slice ${sliceIndex}`}
+            className={`slice-image ${loading ? "loading" : ""}`}
+          />
+        ) : (
+          <div className="slice-placeholder">Loading slice...</div>
+        )}
+      </div>
+      <div className="slice-controls">
+        <span className="slice-label">Slice</span>
+        <input
+          type="range"
+          min={0}
+          max={maxSlice}
+          value={sliceIndex}
+          onChange={(e) => setSliceIndex(Number(e.target.value))}
+          className="slice-slider"
+        />
+        <span className="slice-index">{sliceIndex} / {maxSlice}</span>
+      </div>
+      <p className="slice-hint">
+        {axis === "axial" && "Top-down view · Red overlay = detected tumor"}
+        {axis === "coronal" && "Front-to-back view · Red overlay = detected tumor"}
+        {axis === "sagittal" && "Side view · Red overlay = detected tumor"}
+      </p>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   RESULTS PAGE (3D Viewer + Stats + Slice Viewer)
+   ═══════════════════════════════════════════════════════ */
 function ResultsPage({ result, onNavigate }) {
   const s = result.summary;
   const m = result.metrics;
@@ -358,8 +503,11 @@ function ResultsPage({ result, onNavigate }) {
         </div>
       </div>
 
-      <div className="viewer-container">
-        <Viewer tumorMeshUrl={result.mesh_url} brainMeshUrl={result.brain_mesh_url} />
+      <div className="results-dual">
+        <div className="viewer-container">
+          <Viewer tumorMeshUrl={result.mesh_url} brainMeshUrl={result.brain_mesh_url} />
+        </div>
+        <SliceViewer sliceInfo={result.slice_info} />
       </div>
 
       <div className="stats-bar">
@@ -570,7 +718,7 @@ export default function App() {
   const [status, setStatus] = useState({ text: "Ready", kind: "idle" });
   const [result, setResult] = useState({
     summary: {}, metrics: {}, reasoning: [], pipeline: {},
-    input_metadata: {}, mesh_url: null, brain_mesh_url: null,
+    input_metadata: {}, mesh_url: null, brain_mesh_url: null, slice_info: null,
   });
 
   const hasResults = Boolean(result.mesh_url);
@@ -584,6 +732,7 @@ export default function App() {
       input_metadata: data.input_metadata || {},
       mesh_url: data.mesh_url || null,
       brain_mesh_url: data.brain_mesh_url || null,
+      slice_info: data.slice_info || null,
     });
     setCurrentPage("results");
   };
