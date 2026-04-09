@@ -71,14 +71,33 @@ def build_mesh(mask: np.ndarray, output_dir: str = "app/static", voxel_spacing=(
 def build_brain_mesh(volume: np.ndarray, output_dir: str = "app/static", voxel_spacing=(1.0, 1.0, 1.0)) -> dict:
     """
     Generate a brain surface mesh from the volume for anatomical context.
+    Uses adaptive thresholding and heavy smoothing for a clean shape.
     """
     print("[MeshBuilder] Generating brain surface mesh...")
     
     os.makedirs(output_dir, exist_ok=True)
     
-    # Create brain boundary
-    brain_boundary = (volume > 0.15).astype(np.float32)
-    smooth_brain = box_blur(brain_boundary, passes=2)
+    # Adaptive threshold: use the 15th percentile of non-zero voxels
+    nonzero = volume[volume > 0]
+    if len(nonzero) == 0:
+        print("  WARNING: Volume is empty, skipping brain mesh")
+        return None
+    threshold = np.percentile(nonzero, 15)
+    print(f"  Brain threshold: {threshold:.4f} (adaptive, 15th percentile)")
+    
+    # Create brain boundary with adaptive threshold
+    brain_boundary = (volume > threshold).astype(np.float32)
+    
+    # Fill small holes with morphological closing
+    try:
+        from scipy import ndimage
+        brain_boundary = ndimage.binary_closing(brain_boundary, iterations=3).astype(np.float32)
+        brain_boundary = ndimage.binary_fill_holes(brain_boundary).astype(np.float32)
+    except ImportError:
+        pass  # scipy not available, skip morphological cleanup
+    
+    # Heavy smoothing for a clean brain surface
+    smooth_brain = box_blur(brain_boundary, passes=4)
     
     try:
         verts, faces, normals, values = measure.marching_cubes(
