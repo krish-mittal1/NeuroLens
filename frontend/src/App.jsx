@@ -25,15 +25,14 @@ const PATIENT_COPY = {
 };
 
 function resolveAssetUrl(path) {
-  if (!path) {
-    return null;
-  }
-  if (/^https?:\/\//i.test(path)) {
-    return path;
-  }
+  if (!path) return null;
+  if (/^https?:\/\//i.test(path)) return path;
   return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
+/* ═══════════════════════════════════════════════════════
+   3D VIEWER
+   ═══════════════════════════════════════════════════════ */
 function Viewer({ tumorMeshUrl, brainMeshUrl }) {
   const mountRef = useRef(null);
   const sceneRef = useRef(null);
@@ -45,12 +44,10 @@ function Viewer({ tumorMeshUrl, brainMeshUrl }) {
 
   useEffect(() => {
     const mount = mountRef.current;
-    if (!mount) {
-      return undefined;
-    }
+    if (!mount) return undefined;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x09111f);
+    scene.background = new THREE.Color(0x111b2e);
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 5000);
@@ -66,12 +63,16 @@ function Viewer({ tumorMeshUrl, brainMeshUrl }) {
     controls.target.set(0, 0, 0);
     controlsRef.current = controls;
 
-    const ambient = new THREE.AmbientLight(0xffffff, 1.15);
-    const keyLight = new THREE.DirectionalLight(0x8fdfff, 1.7);
+    const ambient = new THREE.AmbientLight(0xffffff, 1.5);
+    const keyLight = new THREE.DirectionalLight(0xaaddff, 2.0);
     keyLight.position.set(120, 160, 90);
-    const rimLight = new THREE.DirectionalLight(0x7effc3, 0.75);
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    fillLight.position.set(-80, 60, 60);
+    const rimLight = new THREE.DirectionalLight(0x7effc3, 1.2);
     rimLight.position.set(-80, -20, -120);
-    scene.add(ambient, keyLight, rimLight);
+    const bottomLight = new THREE.DirectionalLight(0x4488cc, 0.6);
+    bottomLight.position.set(0, -100, 0);
+    scene.add(ambient, keyLight, fillLight, rimLight, bottomLight);
 
     loaderRef.current = new OBJLoader();
 
@@ -110,36 +111,27 @@ function Viewer({ tumorMeshUrl, brainMeshUrl }) {
     const camera = cameraRef.current;
     const controls = controlsRef.current;
     const loader = loaderRef.current;
-    if (!scene || !camera || !controls || !loader) {
-      return undefined;
-    }
+    if (!scene || !camera || !controls || !loader) return undefined;
 
     const applyMaterial = (root, material) => {
       root.traverse((child) => {
-        if (child.isMesh) {
-          child.material = material;
-        }
+        if (child.isMesh) child.material = material;
       });
     };
 
-    const loadObj = (url, material, slot) =>
+    const loadObj = (url, material, slot, renderOrder = 0) =>
       new Promise((resolve, reject) => {
         if (!url) {
-          if (slot.current) {
-            scene.remove(slot.current);
-            slot.current = null;
-          }
+          if (slot.current) { scene.remove(slot.current); slot.current = null; }
           resolve(null);
           return;
         }
-
         loader.load(
           `${url}?t=${Date.now()}`,
           (object) => {
             applyMaterial(object, material);
-            if (slot.current) {
-              scene.remove(slot.current);
-            }
+            object.renderOrder = renderOrder;
+            if (slot.current) scene.remove(slot.current);
             slot.current = object;
             scene.add(object);
             resolve(object);
@@ -150,27 +142,19 @@ function Viewer({ tumorMeshUrl, brainMeshUrl }) {
       });
 
     const tumorMaterial = new THREE.MeshPhysicalMaterial({
-      color: 0xff6b6b,
-      transparent: true,
-      opacity: 0.92,
-      roughness: 0.28,
-      metalness: 0.05,
-      transmission: 0.08,
+      color: 0xff5555, transparent: true, opacity: 0.95,
+      roughness: 0.25, metalness: 0.05, emissive: 0x331111, emissiveIntensity: 0.3,
+      depthWrite: true,
     });
-
     const brainMaterial = new THREE.MeshPhysicalMaterial({
-      color: 0x67c6ff,
-      transparent: true,
-      opacity: 0.12,
-      roughness: 0.4,
-      metalness: 0,
-      side: THREE.DoubleSide,
+      color: 0x88ccff, transparent: true, opacity: 0.18,
+      roughness: 0.3, metalness: 0.1, side: THREE.DoubleSide,
+      emissive: 0x112244, emissiveIntensity: 0.2,
+      depthWrite: false,
     });
 
     const frameObject = (object) => {
-      if (!object) {
-        return;
-      }
+      if (!object) return;
       const box = new THREE.Box3().setFromObject(object);
       const size = box.getSize(new THREE.Vector3()).length();
       const center = box.getCenter(new THREE.Vector3());
@@ -181,313 +165,445 @@ function Viewer({ tumorMeshUrl, brainMeshUrl }) {
     };
 
     let cancelled = false;
-
     Promise.all([
-      loadObj(resolveAssetUrl(tumorMeshUrl), tumorMaterial, tumorRef),
-      loadObj(resolveAssetUrl(brainMeshUrl), brainMaterial, brainRef),
-    ])
-      .then(([tumor]) => {
-        if (!cancelled) {
-          frameObject(tumor);
-        }
-      })
-      .catch((error) => {
-        console.error("Failed to load mesh", error);
-      });
+      loadObj(resolveAssetUrl(tumorMeshUrl), tumorMaterial, tumorRef, 2),
+      loadObj(resolveAssetUrl(brainMeshUrl), brainMaterial, brainRef, 1),
+    ]).then(([tumor]) => {
+      if (!cancelled) frameObject(tumor);
+    }).catch((error) => console.error("Failed to load mesh", error));
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [tumorMeshUrl, brainMeshUrl]);
 
   return <div className="viewer" ref={mountRef} />;
 }
 
-function UploadPanel({ running, selectedFile, onFileChange, onAnalyzeUpload, onUseSample, status }) {
+/* ═══════════════════════════════════════════════════════
+   NAVBAR
+   ═══════════════════════════════════════════════════════ */
+function Navbar({ currentPage, onNavigate, hasResults, modelStatus }) {
   return (
-    <section className="panel controls">
-      <div className="panel-header">
-        <h2>Upload Scan</h2>
-        <p>Upload DICOM zip, NIfTI volume, or use the sample case to preview the workflow.</p>
+    <nav className="navbar">
+      <div className="nav-brand">
+        <span className="logo-icon">🧠</span>
+        NeuroLens
       </div>
-      <div className="field">
-        <label htmlFor="scanFile">MRI scan file</label>
-        <input
-          id="scanFile"
-          type="file"
-          accept=".zip,.nii,.gz,.npy,.dcm"
-          onChange={(event) => onFileChange(event.target.files?.[0] || null)}
-        />
-        <small>{selectedFile ? `Selected: ${selectedFile.name}` : "DICOM series should be uploaded as a zip archive."}</small>
-      </div>
-      <div className="actions">
-        <button type="button" disabled={running} onClick={onAnalyzeUpload}>
-          Analyze Upload
+      <div className="nav-links">
+        <button
+          className={`nav-link ${currentPage === "upload" ? "active" : ""}`}
+          onClick={() => onNavigate("upload")}
+        >
+          Upload
         </button>
-        <button type="button" className="secondary" disabled={running} onClick={onUseSample}>
-          Use Sample Case
-        </button>
+        {hasResults && (
+          <>
+            <button
+              className={`nav-link ${currentPage === "results" ? "active" : ""}`}
+              onClick={() => onNavigate("results")}
+            >
+              3D Viewer
+            </button>
+            <button
+              className={`nav-link ${currentPage === "patient" ? "active" : ""}`}
+              onClick={() => onNavigate("patient")}
+            >
+              Patient View
+            </button>
+            <button
+              className={`nav-link ${currentPage === "doctor" ? "active" : ""}`}
+              onClick={() => onNavigate("doctor")}
+            >
+              Doctor View
+            </button>
+          </>
+        )}
       </div>
-      <p className={`status ${status.kind}`}>{status.text}</p>
-    </section>
+      <div className="nav-status">
+        <span className="dot" />
+        {modelStatus?.exists ? `Model: ${modelStatus.arch}` : "Ready"}
+      </div>
+    </nav>
   );
 }
 
-function DataSourcePanel({
-  cases,
-  selectedCaseId,
-  selectedModality,
-  selectedSource,
-  onSelectCase,
-  onSelectModality,
-  onSelectSource,
-  onAnalyzeCase,
-  onRefreshCases,
-  loadingCases,
-  running,
-  modelStatus,
+/* ═══════════════════════════════════════════════════════
+   UPLOAD PAGE
+   ═══════════════════════════════════════════════════════ */
+function UploadPage({
+  running, selectedFile, onFileChange, onAnalyzeUpload, onUseSample,
+  cases, selectedCaseId, selectedModality, selectedSource,
+  onSelectCase, onSelectModality, onSelectSource, onAnalyzeCase,
+  onRefreshCases, loadingCases, modelStatus, status,
 }) {
   return (
-    <section className="panel source-panel">
-      <div className="panel-header">
-        <h2>Local BraTS Cases</h2>
-        <p>Use a real training case directly from the downloaded BraTS dataset.</p>
-      </div>
-      <div className="source-actions">
-        <button type="button" className="secondary" disabled={loadingCases} onClick={onRefreshCases}>
-          {loadingCases ? "Refreshing..." : "Refresh Cases"}
-        </button>
-      </div>
-      <div className="field">
-        <label htmlFor="bratsCase">BraTS case</label>
-        <select id="bratsCase" value={selectedCaseId} onChange={(event) => onSelectCase(event.target.value)}>
-          <option value="">Select a BraTS training case</option>
-          {cases.map((item) => (
-            <option key={item.case_id} value={item.case_id}>
-              {item.case_id}
-            </option>
-          ))}
-        </select>
-        <small>{cases.length ? `${cases.length} cases loaded from backend dataset root.` : "No cases loaded yet."}</small>
-      </div>
-      <div className="dual-field">
-        <div className="field">
-          <label htmlFor="bratsModality">Viewer modality</label>
-          <select id="bratsModality" value={selectedModality} onChange={(event) => onSelectModality(event.target.value)}>
-            <option value="flair">FLAIR</option>
-            <option value="t1">T1</option>
-            <option value="t1ce">T1CE</option>
-            <option value="t2">T2</option>
-          </select>
+    <div className="page">
+      <section className="hero-section">
+        <span className="hero-badge">✦ Surgical Decision Intelligence</span>
+        <h1 className="hero-title">MRI to 3D Insight in Seconds</h1>
+        <p className="hero-subtitle">
+          Upload a brain MRI scan and get an interactive 3D visualization with clinical metrics,
+          risk assessment, and reasoning — presented differently for patients and doctors.
+        </p>
+      </section>
+
+      <div className="upload-page">
+        <div className="upload-grid">
+          {/* Upload Card */}
+          <div className="card">
+            <span className="card-label">Upload</span>
+            <h2 className="card-title">Scan File</h2>
+            <p className="card-desc">
+              Upload a DICOM zip archive, NIfTI volume, or NumPy file to analyze.
+            </p>
+            <div className="form-group">
+              <label className="form-label" htmlFor="scanFile">MRI scan file</label>
+              <input
+                id="scanFile"
+                className="file-input"
+                type="file"
+                accept=".zip,.nii,.gz,.npy,.dcm"
+                onChange={(e) => onFileChange(e.target.files?.[0] || null)}
+              />
+              <p className="form-hint">
+                {selectedFile ? `Selected: ${selectedFile.name}` : "Supports .zip, .nii, .nii.gz, .npy, .dcm"}
+              </p>
+            </div>
+            <div className="btn-group">
+              <button className="btn btn-primary" disabled={running} onClick={onAnalyzeUpload}>
+                {running ? <><span className="spinner" /> Analyzing...</> : "Analyze Upload"}
+              </button>
+              <button className="btn btn-secondary" disabled={running} onClick={onUseSample}>
+                Use Sample Case
+              </button>
+            </div>
+            <p className={`status-text ${status.kind}`}>{status.text}</p>
+          </div>
+
+          {/* BraTS Card */}
+          <div className="card">
+            <span className="card-label green">Dataset</span>
+            <h2 className="card-title">BraTS Cases</h2>
+            <p className="card-desc">
+              Select a real training case from your local BraTS2020 dataset.
+            </p>
+            <div className="form-group">
+              <label className="form-label" htmlFor="bratsCase">Training case</label>
+              <select
+                id="bratsCase"
+                className="select-input"
+                value={selectedCaseId}
+                onChange={(e) => onSelectCase(e.target.value)}
+              >
+                <option value="">Select a BraTS case</option>
+                {cases.map((c) => (
+                  <option key={c.case_id} value={c.case_id}>{c.case_id}</option>
+                ))}
+              </select>
+              <p className="form-hint">
+                {cases.length ? `${cases.length} cases loaded` : "Click Refresh to load cases"}
+              </p>
+            </div>
+            <div className="row-2">
+              <div className="form-group">
+                <label className="form-label" htmlFor="modality">Modality</label>
+                <select id="modality" className="select-input" value={selectedModality} onChange={(e) => onSelectModality(e.target.value)}>
+                  <option value="flair">FLAIR</option>
+                  <option value="t1">T1</option>
+                  <option value="t1ce">T1CE</option>
+                  <option value="t2">T2</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor="source">Mask source</label>
+                <select id="source" className="select-input" value={selectedSource} onChange={(e) => onSelectSource(e.target.value)}>
+                  <option value="ground_truth">Ground Truth</option>
+                  <option value="model" disabled={!modelStatus?.exists}>MONAI Model</option>
+                </select>
+              </div>
+            </div>
+            <div className="btn-group">
+              <button className="btn btn-primary" disabled={running || !selectedCaseId} onClick={onAnalyzeCase}>
+                Analyze Case
+              </button>
+              <button className="btn btn-secondary" disabled={loadingCases} onClick={onRefreshCases}>
+                {loadingCases ? "Refreshing..." : "Refresh Cases"}
+              </button>
+            </div>
+            <div className={`model-badge ${modelStatus?.exists ? "active" : "inactive"}`}>
+              {modelStatus?.exists ? `✓ Model: ${modelStatus.mode} (${modelStatus.arch})` : "○ Model not configured — using ground truth"}
+            </div>
+          </div>
         </div>
-        <div className="field">
-          <label htmlFor="bratsSource">Mask source</label>
-          <select id="bratsSource" value={selectedSource} onChange={(event) => onSelectSource(event.target.value)}>
-            <option value="ground_truth">Ground Truth Seg</option>
-            <option value="model" disabled={!modelStatus?.exists}>
-              MONAI Model
-            </option>
-          </select>
-        </div>
       </div>
-      <small>
-        Model status:{" "}
-        {modelStatus?.exists
-          ? `configured (${modelStatus.mode})`
-          : "not configured yet - ground truth mode is active"}
-      </small>
-      <div className="actions">
-        <button type="button" disabled={running || !selectedCaseId} onClick={onAnalyzeCase}>
-          Analyze BraTS Case
-        </button>
-      </div>
-    </section>
+    </div>
   );
 }
 
-function PatientView({ summary, metrics }) {
-  const riskKey = metrics?.risk_level?.toLowerCase() || "default";
-  const copy = PATIENT_COPY[riskKey] || PATIENT_COPY.default;
-  const region = summary?.region || "the analyzed area";
-  const volume = summary?.volume || "not available";
-  const depth = summary?.depth || "not available";
+/* ═══════════════════════════════════════════════════════
+   RESULTS PAGE (3D Viewer + Stats)
+   ═══════════════════════════════════════════════════════ */
+function ResultsPage({ result, onNavigate }) {
+  const s = result.summary;
+  const m = result.metrics;
+  const riskClass = `risk-${(m?.risk_level || "low").toLowerCase()}`;
 
   return (
-    <section className="role-layout patient-layout">
-      <article className="panel patient-hero-card">
-        <div className="panel-header">
-          <h2>Patient View</h2>
-          <p>Simple language summary for the person receiving care.</p>
+    <div className="page results-page">
+      <div className="results-header">
+        <h2>3D Analysis</h2>
+        <div className="view-tabs">
+          <button className="view-tab active">3D Viewer</button>
+          <button className="view-tab" onClick={() => onNavigate("patient")}>Patient</button>
+          <button className="view-tab" onClick={() => onNavigate("doctor")}>Doctor</button>
         </div>
-        <div className="patient-headline">
-          <span className="patient-tag">{copy.headline}</span>
-          <h3>{region}</h3>
+      </div>
+
+      <div className="viewer-container">
+        <Viewer tumorMeshUrl={result.mesh_url} brainMeshUrl={result.brain_mesh_url} />
+      </div>
+
+      <div className="stats-bar">
+        <div className="stat-card">
+          <span className="stat-label">Region</span>
+          <span className="stat-value">{s?.region || "—"}</span>
+        </div>
+        <div className="stat-card">
+          <span className="stat-label">Volume</span>
+          <span className="stat-value">{s?.volume || "—"}</span>
+        </div>
+        <div className="stat-card">
+          <span className="stat-label">Dimensions</span>
+          <span className="stat-value">{s?.dimensions || "—"}</span>
+        </div>
+        <div className="stat-card">
+          <span className="stat-label">Laterality</span>
+          <span className="stat-value">{s?.laterality || "—"}</span>
+        </div>
+        <div className="stat-card">
+          <span className="stat-label">Depth</span>
+          <span className="stat-value">{s?.depth || "—"}</span>
+        </div>
+        <div className="stat-card">
+          <span className="stat-label">Risk Level</span>
+          <span className={`stat-value ${riskClass}`}>{s?.risk_level || "—"}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   PATIENT VIEW PAGE
+   ═══════════════════════════════════════════════════════ */
+function PatientPage({ result, onNavigate }) {
+  const s = result.summary;
+  const m = result.metrics;
+  const riskKey = m?.risk_level?.toLowerCase() || "default";
+  const copy = PATIENT_COPY[riskKey] || PATIENT_COPY.default;
+
+  return (
+    <div className="page results-page">
+      <div className="results-header">
+        <h2>Patient Report</h2>
+        <div className="view-tabs">
+          <button className="view-tab" onClick={() => onNavigate("results")}>3D Viewer</button>
+          <button className="view-tab active">Patient</button>
+          <button className="view-tab" onClick={() => onNavigate("doctor")}>Doctor</button>
+        </div>
+      </div>
+
+      <section className="patient-section">
+        <div className="patient-hero">
+          <span className="tag">{copy.headline}</span>
+          <h3>{s?.region || "Scan Analysis"}</h3>
           <p>{copy.tone}</p>
         </div>
-        <div className="patient-grid">
-          <div className="patient-card">
-            <span>Observed area</span>
-            <strong>{region}</strong>
-            <p>The system mapped the finding to this part of the brain.</p>
+
+        <div className="info-grid">
+          <div className="info-card">
+            <span className="label">Observed area</span>
+            <span className="value">{s?.region || "—"}</span>
+            <span className="desc">The system mapped the finding to this part of the brain.</span>
           </div>
-          <div className="patient-card">
-            <span>Estimated size</span>
-            <strong>{volume}</strong>
-            <p>This is an approximate measurement from the segmented scan.</p>
+          <div className="info-card">
+            <span className="label">Estimated size</span>
+            <span className="value">{s?.volume || "—"}</span>
+            <span className="desc">This is an approximate measurement from the segmented scan.</span>
           </div>
-          <div className="patient-card">
-            <span>Depth</span>
-            <strong>{depth}</strong>
-            <p>This helps estimate how close the area is to the outer brain surface.</p>
+          <div className="info-card">
+            <span className="label">Depth from surface</span>
+            <span className="value">{s?.depth || "—"}</span>
+            <span className="desc">This helps estimate how close the area is to the outer brain surface.</span>
           </div>
-          <div className="patient-card">
-            <span>Next step</span>
-            <strong>Doctor review</strong>
-            <p>A specialist should combine this with symptoms and other tests before making decisions.</p>
+          <div className="info-card">
+            <span className="label">What's next</span>
+            <span className="value">Doctor Review</span>
+            <span className="desc">A specialist should combine this with symptoms and other tests before making decisions.</span>
           </div>
         </div>
-      </article>
-    </section>
+      </section>
+    </div>
   );
 }
 
-function DoctorSummary({ summary, pipeline, inputMetadata, metrics }) {
-  const summaryEntries = Object.entries(summary || {});
-  const metaLines = [
-    `Pipeline mode: ${pipeline?.mode || "unknown"}`,
-    `Input type: ${pipeline?.input_type || "unknown"}`,
-    `Segmentation: ${pipeline?.segmentation_mode || "unknown"}`,
-    `Voxel spacing (mm): ${(pipeline?.voxel_spacing_mm || []).join(", ") || "n/a"}`,
-    `Slices: ${inputMetadata?.slice_count ?? "n/a"}`,
-    `Patient ID: ${inputMetadata?.patient_id || "demo"}`,
-  ];
-
-  const metricLines = [
-    `Volume (cm3): ${metrics?.tumor_volume_cm3 ?? "n/a"}`,
-    `Region function: ${metrics?.region_function || "n/a"}`,
-    `Midline distance (mm): ${metrics?.midline_distance_mm ?? "n/a"}`,
-    `Centroid voxel: ${(metrics?.centroid_voxel || []).join(", ") || "n/a"}`,
-  ];
+/* ═══════════════════════════════════════════════════════
+   DOCTOR VIEW PAGE
+   ═══════════════════════════════════════════════════════ */
+function DoctorPage({ result, onNavigate }) {
+  const s = result.summary;
+  const m = result.metrics;
+  const p = result.pipeline;
+  const im = result.input_metadata;
+  const reasoning = result.reasoning || [];
+  const riskFactors = m?.risk_factors || [];
 
   return (
-    <article className="panel summary-panel">
-      <div className="panel-header">
-        <h2>Doctor View</h2>
-        <p>Technical summary with planning data, imaging metadata, and model output context.</p>
-      </div>
-      <dl className="summary-list">
-        {summaryEntries.map(([key, value]) => (
-          <div key={key}>
-            <dt>{key.replaceAll("_", " ")}</dt>
-            <dd>{value}</dd>
-          </div>
-        ))}
-      </dl>
-      <div className="meta-block">
-        {metricLines.map((line) => (
-          <div key={line} className="meta-line">
-            {line}
-          </div>
-        ))}
-        {metaLines.map((line) => (
-          <div key={line} className="meta-line">
-            {line}
-          </div>
-        ))}
-      </div>
-    </article>
-  );
-}
-
-function ReasoningTrace({ steps, riskFactors }) {
-  return (
-    <section className="panel">
-      <div className="panel-header">
-        <h2>Clinical Reasoning</h2>
-        <p>Transparent step-by-step justification for the reported summary.</p>
-      </div>
-      {riskFactors?.length > 0 ? (
-        <div className="risk-strip">
-          {riskFactors.map((factor) => (
-            <span key={factor} className="risk-chip">
-              {factor}
-            </span>
-          ))}
+    <div className="page results-page">
+      <div className="results-header">
+        <h2>Clinical Console</h2>
+        <div className="view-tabs">
+          <button className="view-tab" onClick={() => onNavigate("results")}>3D Viewer</button>
+          <button className="view-tab" onClick={() => onNavigate("patient")}>Patient</button>
+          <button className="view-tab active">Doctor</button>
         </div>
-      ) : null}
-      <div className="reasoning-list">
-        {(steps || []).map((step) => (
-          <article key={step.step} className="reasoning-step">
-            <header>
-              <h3>
-                {step.step}. {step.title}
-              </h3>
-              <span className="pill">{step.confidence}</span>
-            </header>
-            <p>{step.detail}</p>
-          </article>
-        ))}
       </div>
-    </section>
+
+      <section className="doctor-section">
+        <div className="doctor-grid">
+          {/* Summary */}
+          <div className="detail-card">
+            <h3>Clinical Summary</h3>
+            <p className="subtitle">Technical data extracted from the segmentation pipeline.</p>
+            <dl className="detail-list">
+              {Object.entries(s || {}).map(([key, value]) => (
+                <div className="detail-item" key={key}>
+                  <dt>{key.replaceAll("_", " ")}</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+            </dl>
+            <div className="meta-list" style={{ marginTop: 18 }}>
+              <div className="meta-row">Volume (cm³): <span>{m?.tumor_volume_cm3 ?? "n/a"}</span></div>
+              <div className="meta-row">Region function: <span>{m?.region_function || "n/a"}</span></div>
+              <div className="meta-row">Midline distance: <span>{m?.midline_distance_mm ?? "n/a"} mm</span></div>
+              <div className="meta-row">Centroid: <span>{(m?.centroid_voxel || []).join(", ") || "n/a"}</span></div>
+            </div>
+          </div>
+
+          {/* Focus */}
+          <div className="detail-card">
+            <h3>Planning Focus</h3>
+            <p className="subtitle">High-signal cues for the surgical workflow.</p>
+            <div className="focus-grid">
+              <div className="focus-item">
+                <span className="label">Laterality</span>
+                <span className="value">{s?.laterality || "n/a"}</span>
+              </div>
+              <div className="focus-item">
+                <span className="label">Risk Level</span>
+                <span className="value">{s?.risk_level || "n/a"}</span>
+              </div>
+              <div className="focus-item">
+                <span className="label">Dimensions</span>
+                <span className="value">{s?.dimensions || "n/a"}</span>
+              </div>
+              <div className="focus-item">
+                <span className="label">Depth</span>
+                <span className="value">{s?.depth || "n/a"}</span>
+              </div>
+              <div className="focus-item">
+                <span className="label">Pipeline</span>
+                <span className="value">{p?.segmentation_mode || "n/a"}</span>
+              </div>
+              <div className="focus-item">
+                <span className="label">Voxel Spacing</span>
+                <span className="value">{(p?.voxel_spacing_mm || []).join(" × ") || "n/a"} mm</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Reasoning */}
+        <div className="detail-card reasoning-section">
+          <h3>Clinical Reasoning</h3>
+          <p className="subtitle">Step-by-step justification for the reported summary.</p>
+
+          {riskFactors.length > 0 && (
+            <div className="risk-chips">
+              {riskFactors.map((f) => (
+                <span key={f} className="risk-chip">{f}</span>
+              ))}
+            </div>
+          )}
+
+          <div className="reasoning-steps">
+            {reasoning.map((step) => (
+              <div key={step.step} className="reasoning-step">
+                <div className="step-header">
+                  <span className="step-number">{step.step}</span>
+                  <span className="step-title">{step.title}</span>
+                  <span className="confidence-badge">{step.confidence}</span>
+                </div>
+                <p className="step-detail">{step.detail}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }
 
+/* ═══════════════════════════════════════════════════════
+   APP ROOT
+   ═══════════════════════════════════════════════════════ */
 export default function App() {
+  const [currentPage, setCurrentPage] = useState("upload");
   const [selectedFile, setSelectedFile] = useState(null);
   const [bratsCases, setBratsCases] = useState([]);
   const [selectedCaseId, setSelectedCaseId] = useState("");
   const [selectedModality, setSelectedModality] = useState("flair");
   const [selectedSource, setSelectedSource] = useState("ground_truth");
-  const [activeView, setActiveView] = useState("patient");
   const [running, setRunning] = useState(false);
   const [loadingCases, setLoadingCases] = useState(false);
   const [modelStatus, setModelStatus] = useState(null);
   const [status, setStatus] = useState({ text: "Ready", kind: "idle" });
   const [result, setResult] = useState({
-    summary: {},
-    metrics: {},
-    reasoning: [],
-    pipeline: {},
-    input_metadata: {},
-    mesh_url: null,
-    brain_mesh_url: null,
+    summary: {}, metrics: {}, reasoning: [], pipeline: {},
+    input_metadata: {}, mesh_url: null, brain_mesh_url: null,
   });
+
+  const hasResults = Boolean(result.mesh_url);
+
+  const handleResult = (data) => {
+    setResult({
+      summary: data.summary || {},
+      metrics: data.metrics || {},
+      reasoning: data.reasoning || [],
+      pipeline: data.pipeline || {},
+      input_metadata: data.input_metadata || {},
+      mesh_url: data.mesh_url || null,
+      brain_mesh_url: data.brain_mesh_url || null,
+    });
+    setCurrentPage("results");
+  };
 
   const runAnalysis = async (useSample) => {
     setRunning(true);
     setStatus({ text: "Running MRI analysis pipeline...", kind: "idle" });
-
     try {
       let response;
       if (useSample) {
         response = await fetch(`${API_BASE}/api/sample-analysis`);
       } else {
-        if (!selectedFile) {
-          throw new Error("Choose a scan file or use the sample case.");
-        }
-
+        if (!selectedFile) throw new Error("Choose a scan file or use the sample case.");
         const formData = new FormData();
         formData.append("file", selectedFile);
-        response = await fetch(`${API_BASE}/api/analyze`, {
-          method: "POST",
-          body: formData,
-        });
+        response = await fetch(`${API_BASE}/api/analyze`, { method: "POST", body: formData });
       }
-
       const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.detail || "Analysis failed");
-      }
-
-      setResult({
-        summary: data.summary || {},
-        metrics: data.metrics || {},
-        reasoning: data.reasoning || [],
-        pipeline: data.pipeline || {},
-        input_metadata: data.input_metadata || {},
-        mesh_url: data.mesh_url || null,
-        brain_mesh_url: data.brain_mesh_url || null,
-      });
+      if (!response.ok) throw new Error(data.detail || "Analysis failed");
+      handleResult(data);
       setStatus({ text: "Analysis complete.", kind: "success" });
     } catch (error) {
       console.error(error);
@@ -502,13 +618,9 @@ export default function App() {
     try {
       const response = await fetch(`${API_BASE}/api/brats-cases?limit=50`);
       const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.detail || "Failed to load BraTS cases");
-      }
+      if (!response.ok) throw new Error(data.detail || "Failed to load BraTS cases");
       setBratsCases(data.cases || []);
-      if (!selectedCaseId && data.cases?.length) {
-        setSelectedCaseId(data.cases[0].case_id);
-      }
+      if (!selectedCaseId && data.cases?.length) setSelectedCaseId(data.cases[0].case_id);
     } catch (error) {
       console.error(error);
       setStatus({ text: error.message, kind: "error" });
@@ -521,9 +633,7 @@ export default function App() {
     try {
       const response = await fetch(`${API_BASE}/api/model-status`);
       const data = await response.json();
-      if (response.ok) {
-        setModelStatus(data.model || null);
-      }
+      if (response.ok) setModelStatus(data.model || null);
     } catch (error) {
       console.error(error);
     }
@@ -534,31 +644,15 @@ export default function App() {
       setStatus({ text: "Select a BraTS case first.", kind: "error" });
       return;
     }
-
     setRunning(true);
     setStatus({ text: `Loading BraTS case ${selectedCaseId}...`, kind: "idle" });
-
     try {
-      const params = new URLSearchParams({
-        modality: selectedModality,
-        source: selectedSource,
-      });
+      const params = new URLSearchParams({ modality: selectedModality, source: selectedSource });
       const response = await fetch(`${API_BASE}/api/brats-analysis/${selectedCaseId}?${params.toString()}`);
       const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.detail || "BraTS analysis failed");
-      }
-
-      setResult({
-        summary: data.summary || {},
-        metrics: data.metrics || {},
-        reasoning: data.reasoning || [],
-        pipeline: data.pipeline || {},
-        input_metadata: data.input_metadata || {},
-        mesh_url: data.mesh_url || null,
-        brain_mesh_url: data.brain_mesh_url || null,
-      });
-      setStatus({ text: `BraTS case ${selectedCaseId} analyzed successfully.`, kind: "success" });
+      if (!response.ok) throw new Error(data.detail || "BraTS analysis failed");
+      handleResult(data);
+      setStatus({ text: `Case ${selectedCaseId} analyzed.`, kind: "success" });
     } catch (error) {
       console.error(error);
       setStatus({ text: error.message, kind: "error" });
@@ -573,36 +667,21 @@ export default function App() {
   }, []);
 
   return (
-    <main className="shell">
-      <section className="hero hero-grid">
-        <div>
-          <p className="eyebrow">NeuroLens</p>
-          <h1>Role-based MRI analysis for patients and doctors</h1>
-          <p className="lede">
-            One scan, two experiences: a simple explanation for the patient and a full clinical reasoning view
-            for the doctor.
-          </p>
-        </div>
-        <div className="hero-note panel">
-          <span className="hero-note-label">Current Mode</span>
-          <strong>{activeView === "patient" ? "Patient-friendly report" : "Doctor planning console"}</strong>
-          <p>
-            Switch between plain-language communication and technical reasoning without rerunning the analysis.
-          </p>
-        </div>
-      </section>
-
-      <section className="top-grid">
-        <div className="stack-grid">
-          <UploadPanel
+    <>
+      <Navbar
+        currentPage={currentPage}
+        onNavigate={setCurrentPage}
+        hasResults={hasResults}
+        modelStatus={modelStatus}
+      />
+      <main className="app-container">
+        {currentPage === "upload" && (
+          <UploadPage
             running={running}
             selectedFile={selectedFile}
             onFileChange={setSelectedFile}
             onAnalyzeUpload={() => runAnalysis(false)}
             onUseSample={() => runAnalysis(true)}
-            status={status}
-          />
-          <DataSourcePanel
             cases={bratsCases}
             selectedCaseId={selectedCaseId}
             selectedModality={selectedModality}
@@ -613,76 +692,14 @@ export default function App() {
             onAnalyzeCase={runBratsCase}
             onRefreshCases={loadBratsCases}
             loadingCases={loadingCases}
-            running={running}
             modelStatus={modelStatus}
+            status={status}
           />
-        </div>
-
-        <article className="panel viewer-panel">
-          <div className="panel-header">
-            <h2>3D Viewer</h2>
-            <p>Shared anatomical view used by both roles.</p>
-          </div>
-          <Viewer tumorMeshUrl={result.mesh_url} brainMeshUrl={result.brain_mesh_url} />
-        </article>
-      </section>
-
-      <section className="view-switch">
-        <button
-          type="button"
-          className={activeView === "patient" ? "view-tab active" : "view-tab"}
-          onClick={() => setActiveView("patient")}
-        >
-          Patient View
-        </button>
-        <button
-          type="button"
-          className={activeView === "doctor" ? "view-tab active" : "view-tab"}
-          onClick={() => setActiveView("doctor")}
-        >
-          Doctor View
-        </button>
-      </section>
-
-      {activeView === "patient" ? (
-        <PatientView summary={result.summary} metrics={result.metrics} />
-      ) : (
-        <section className="role-layout doctor-layout">
-          <div className="grid">
-            <DoctorSummary
-              summary={result.summary}
-              pipeline={result.pipeline}
-              inputMetadata={result.input_metadata}
-              metrics={result.metrics}
-            />
-            <article className="panel doctor-callout">
-              <div className="panel-header">
-                <h2>Clinical Focus</h2>
-                <p>High-signal planning cues for the specialist workflow.</p>
-              </div>
-              <div className="doctor-focus-list">
-                <div className="focus-card">
-                  <span>Laterality</span>
-                  <strong>{result.summary?.laterality || "n/a"}</strong>
-                </div>
-                <div className="focus-card">
-                  <span>Risk level</span>
-                  <strong>{result.summary?.risk_level || "n/a"}</strong>
-                </div>
-                <div className="focus-card">
-                  <span>Dimensions</span>
-                  <strong>{result.summary?.dimensions || "n/a"}</strong>
-                </div>
-                <div className="focus-card">
-                  <span>Depth</span>
-                  <strong>{result.summary?.depth || "n/a"}</strong>
-                </div>
-              </div>
-            </article>
-          </div>
-          <ReasoningTrace steps={result.reasoning} riskFactors={result.metrics?.risk_factors} />
-        </section>
-      )}
-    </main>
+        )}
+        {currentPage === "results" && <ResultsPage result={result} onNavigate={setCurrentPage} />}
+        {currentPage === "patient" && <PatientPage result={result} onNavigate={setCurrentPage} />}
+        {currentPage === "doctor" && <DoctorPage result={result} onNavigate={setCurrentPage} />}
+      </main>
+    </>
   );
 }
