@@ -1,5 +1,5 @@
 """
-NeuroLens Backend — FastAPI Application
+NeuroLens Backend â€” FastAPI Application
 ---------------------------------------
 Browser-based surgical decision intelligence platform.
 Converts MRI scans into interactive 3D visualizations with structured clinical insights.
@@ -15,11 +15,11 @@ from app.routes.analyze import router as analyze_router
 # Create FastAPI app
 app = FastAPI(
     title="NeuroLens API",
-    description="Surgical Decision Intelligence Platform — MRI to 3D Insight",
+    description="Surgical Decision Intelligence Platform â€” MRI to 3D Insight",
     version="1.0.0",
 )
 
-# CORS — allow frontend dev server
+# CORS â€” allow frontend dev server
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],

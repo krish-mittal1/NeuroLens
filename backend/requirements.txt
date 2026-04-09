@@ -7,3 +7,7 @@ scikit-image
 trimesh
 nibabel
 pydicom
+
+# Model inference (SwinUNETR)
+torch
+monai

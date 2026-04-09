@@ -152,6 +152,7 @@ async def analyze_scan(file: UploadFile = File(None)):
             input_metadata = loaded_input.get("metadata", {})
             mask_path = loaded_input.get("mask_path")
             cleanup_dir = loaded_input.get("temp_dir")
+            modality_volumes = loaded_input.get("modality_volumes")
             pipeline_mode = "uploaded_scan"
         else:
             sample_paths = ensure_sample_dataset(SAMPLE_DIR)
@@ -163,12 +164,13 @@ async def analyze_scan(file: UploadFile = File(None)):
                 "voxel_spacing": [1.0, 1.0, 1.0],
             }
             mask_path = sample_paths["mask_path"]
+            modality_volumes = None
         response = _build_analysis_response(
             volume=volume,
             input_metadata=input_metadata,
             mask_path=mask_path,
             pipeline_mode=pipeline_mode,
-            modality_volumes=None,
+            modality_volumes=modality_volumes,
         )
         return JSONResponse(content=response)
 

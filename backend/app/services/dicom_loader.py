@@ -156,13 +156,25 @@ def _load_from_zip(filepath: str) -> dict:
             elif lower_name.endswith(".nii") or lower_name.endswith(".nii.gz"):
                 nii_files.append(full_path)
 
+    # Check for BraTS-style multi-modal NIfTI files in the zip
+    modality_volumes = None
+    if nii_files:
+        modality_volumes, primary_modality_path = _detect_brats_modalities(nii_files)
+
     if dicom_files:
         volume, metadata = load_dicom_series(temp_dir)
         metadata["source_type"] = "dicom_zip"
         result = {"volume": volume, "metadata": metadata, "temp_dir": temp_dir}
     elif nii_files:
-        volume, metadata = load_nifti(nii_files[0])
+        # If multi-modal BraTS files detected, use flair as primary volume
+        if modality_volumes and primary_modality_path:
+            volume, metadata = load_nifti(primary_modality_path)
+        else:
+            volume, metadata = load_nifti(nii_files[0])
         metadata["source_type"] = "nifti_zip"
+        if modality_volumes:
+            metadata["source_type"] = "brats_multimodal_zip"
+            metadata["available_modalities"] = sorted(modality_volumes.keys())
         result = {"volume": volume, "metadata": metadata, "temp_dir": temp_dir}
     elif npy_files:
         volume = load_volume_from_npy(npy_files[0])
@@ -180,8 +192,46 @@ def _load_from_zip(filepath: str) -> dict:
 
     if mask_candidate:
         result["mask_path"] = mask_candidate
+    if modality_volumes:
+        result["modality_volumes"] = modality_volumes
 
     return result
+
+
+def _detect_brats_modalities(nii_files: list) -> tuple:
+    """
+    Detect BraTS-style multi-modal NIfTI files from a list of paths.
+    Returns (modality_volumes dict, primary_modality_path) or (None, None).
+    """
+    modality_suffixes = {
+        "flair": ["_flair.nii.gz", "_flair.nii"],
+        "t1ce": ["_t1ce.nii.gz", "_t1ce.nii"],
+        "t1": ["_t1.nii.gz", "_t1.nii"],
+        "t2": ["_t2.nii.gz", "_t2.nii"],
+    }
+
+    found = {}
+    for path in nii_files:
+        lower_name = os.path.basename(path).lower()
+        # Check t1ce before t1 to avoid false match
+        for modality in ["flair", "t1ce", "t1", "t2"]:
+            for suffix in modality_suffixes[modality]:
+                if lower_name.endswith(suffix) and modality not in found:
+                    found[modality] = path
+                    break
+
+    required = ["flair", "t1", "t1ce", "t2"]
+    if all(mod in found for mod in required):
+        print(f"[DicomLoader] Detected BraTS multi-modal NIfTI: {sorted(found.keys())}")
+        modality_volumes = {}
+        for mod, path in found.items():
+            vol, _ = load_nifti(path)
+            modality_volumes[mod] = vol
+            print(f"  Loaded modality {mod}: shape={vol.shape}")
+        primary_path = found.get("flair", list(found.values())[0])
+        return modality_volumes, primary_path
+
+    return None, None
 
 
 def _normalize_volume(volume: np.ndarray) -> np.ndarray:
