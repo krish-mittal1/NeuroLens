@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+python-multipart
+numpy
+scipy
+scikit-image
+trimesh
+nibabel
+pydicom
