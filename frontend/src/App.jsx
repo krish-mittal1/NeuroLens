@@ -161,13 +161,24 @@ function Viewer({ tumorMeshUrl, brainMeshUrl }) {
     });
     brainMaterialsRef.current = { solid: brainSolid, wireframe: brainWireframe };
 
-    const frameObject = (object) => {
-      if (!object) return;
-      const box = new THREE.Box3().setFromObject(object);
+    // Frame camera to fit ALL loaded objects (tumor + brain combined bounding box)
+    const frameScene = (tumor, brain) => {
+      const box = new THREE.Box3();
+      if (tumor) box.expandByObject(tumor);
+      if (brain) box.expandByObject(brain);
+      if (box.isEmpty()) return;
+
       const size = box.getSize(new THREE.Vector3()).length();
       const center = box.getCenter(new THREE.Vector3());
+      const distance = size * 1.4; // always far enough back to see the full brain
+
       controls.target.copy(center);
-      camera.position.copy(center.clone().add(new THREE.Vector3(size * 0.8, size * 0.6, size * 1.2)));
+      // Position camera at a comfortable 30-degree elevation, front-right view
+      camera.position.set(
+        center.x + distance * 0.5,
+        center.y + distance * 0.4,
+        center.z + distance * 0.9,
+      );
       camera.lookAt(center);
       controls.update();
     };
@@ -177,9 +188,9 @@ function Viewer({ tumorMeshUrl, brainMeshUrl }) {
     Promise.all([
       loadObj(resolveAssetUrl(tumorMeshUrl), tumorMaterial, tumorRef, 2),
       loadObj(resolveAssetUrl(brainMeshUrl), brainSolid, brainRef, 1),
-    ]).then(([tumor]) => {
+    ]).then(([tumor, brain]) => {
       if (!cancelled) {
-        frameObject(tumor);
+        frameScene(tumor, brain);
         setMeshLoading(false);
       }
     }).catch((error) => {

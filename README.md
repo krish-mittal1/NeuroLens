@@ -121,15 +121,52 @@ Opens on `http://127.0.0.1:5173`.
 
 ### Model Setup
 
-1. Download the pre-trained SwinUNETR checkpoint (trained on BraTS2020):
-   - Place `model.pt` somewhere accessible
-   - Set the environment variable: `NEUROLENS_MODEL_PATH=/path/to/model.pt`
-   - Or place it in one of the default search paths (see `segmentor.py`)
+The `model.pt` checkpoint is **not included in the repository** (model weights are too large for Git).
+The app works in three modes — pick whichever fits your situation:
 
-2. (Optional) Point to a local BraTS2020 dataset:
-   - Set `BRATS_DATA_ROOT=/path/to/MICCAI_BraTS2020_TrainingData`
+#### Mode 1 — No model (demo / quick start)
+Skip this step entirely. The app uses a **heuristic intensity-based fallback** segmentation and the built-in synthetic sample data. All UI features work. This is the default when no model is configured.
 
----
+#### Mode 2 — Local model file (if you already have `model.pt`)
+```bash
+# Create your .env from the template
+cp backend/.env.example backend/.env
+
+# Edit .env and set your model path
+NEUROLENS_MODEL_PATH=/absolute/path/to/model.pt
+```
+
+#### Mode 3 — Download from GitHub Releases (for repo forks)
+
+**Step 1 — The repo owner uploads the model once:**
+1. Go to the repo → **Releases** → **Draft a new release**
+2. Tag it `v1.0-model`, title it `SwinUNETR Model Checkpoint`
+3. Attach `model.pt` as a release asset
+4. Publish the release
+5. Copy the asset download URL (looks like: `https://github.com/krish-mittal1/NeuroLens/releases/download/v1.0-model/model.pt`)
+6. Set it as the default in `download_model.py` (line ~18): `DEFAULT_MODEL_URL = "<your URL here>"`
+
+**Step 2 — Anyone who forks the repo runs:**
+```bash
+cd backend
+python download_model.py
+# Model is saved to backend/models/model.pt
+# Add NEUROLENS_MODEL_PATH=./models/model.pt to backend/.env
+```
+
+Or pass a URL directly:
+```bash
+python download_model.py --url https://github.com/krish-mittal1/NeuroLens/releases/download/v1.0-model/model.pt
+```
+
+> **Note:** The `backend/models/` directory and all `*.pt` files are already in `.gitignore` — the model will never be accidentally committed.
+
+### BraTS Dataset (optional)
+
+```bash
+# Point to a local BraTS2020 dataset (contains BraTS20_Training_XXX folders)
+NEUROLENS_BRATS_ROOT=/path/to/MICCAI_BraTS2020_TrainingData
+```
 
 ## Running on Google Colab
 
