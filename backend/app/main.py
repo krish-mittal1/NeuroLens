@@ -6,6 +6,14 @@ Converts MRI scans into interactive 3D visualizations with structured clinical i
 """
 
 import os
+
+# Load .env file if present (must happen before any os.getenv calls)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed — env vars must be set in the system shell
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles

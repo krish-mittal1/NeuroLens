@@ -6,8 +6,12 @@ Keeps the volume + mask in memory and renders slices as PNG on demand.
 """
 
 import io
+import threading
 import numpy as np
 from PIL import Image
+
+# Lock protects _current_data against concurrent analysis requests
+_lock = threading.Lock()
 
 # In-memory store for the last analyzed volume and mask
 _current_data = {
@@ -18,14 +22,16 @@ _current_data = {
 
 def store_slice_data(volume: np.ndarray, mask: np.ndarray):
     """Store volume and mask from the latest analysis for slice serving."""
-    _current_data["volume"] = volume.copy()
-    _current_data["mask"] = mask.copy()
+    with _lock:
+        _current_data["volume"] = volume.copy()
+        _current_data["mask"] = mask.copy()
     print(f"[SliceServer] Stored volume {volume.shape} and mask {mask.shape} for slice viewing")
 
 
 def get_slice_info():
     """Return dimensions of the stored volume."""
-    vol = _current_data["volume"]
+    with _lock:
+        vol = _current_data["volume"]
     if vol is None:
         return None
     return {
@@ -40,8 +46,9 @@ def render_slice(axis: str, index: int) -> bytes:
     Render a single 2D slice as PNG bytes.
     The MRI is shown in grayscale with the tumor mask overlaid in red.
     """
-    vol = _current_data["volume"]
-    mask = _current_data["mask"]
+    with _lock:
+        vol = _current_data["volume"]
+        mask = _current_data["mask"]
 
     if vol is None:
         raise ValueError("No volume data available. Run an analysis first.")

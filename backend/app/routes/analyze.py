@@ -5,6 +5,7 @@ API route for the main /analyze endpoint.
 Orchestrates the full pipeline: load -> segment -> postprocess -> mesh -> metrics -> reasoning.
 """
 
+import glob
 import os
 import shutil
 import uuid
@@ -39,6 +40,13 @@ def _build_analysis_response(
     force_model_inference=False,
 ):
     voxel_spacing = tuple(input_metadata.get("voxel_spacing", [1.0, 1.0, 1.0]))
+
+    # Clean up old tumor meshes from previous runs to prevent disk accumulation
+    for old_mesh in glob.glob(os.path.join(STATIC_DIR, "tumor_*.obj")):
+        try:
+            os.remove(old_mesh)
+        except OSError:
+            pass
 
     print("\n[Pipeline Step 2/6] Segmenting tumor...")
     if force_model_inference:

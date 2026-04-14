@@ -406,6 +406,25 @@ body {
   background: #111b2e;
 }
 
+/* Loading overlay shown while OBJ meshes are being fetched */
+.viewer-loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: rgba(6, 11, 20, 0.7);
+  backdrop-filter: blur(4px);
+  border-radius: var(--radius-lg);
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  font-weight: 500;
+  z-index: 5;
+  pointer-events: none;
+}
+
 .viewer-toolbar {
   position: absolute;
   bottom: 16px;

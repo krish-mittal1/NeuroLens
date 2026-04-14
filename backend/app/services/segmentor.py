@@ -5,9 +5,9 @@ import numpy as np
 
 from app.services.volume_ops import box_blur, largest_connected_component
 
-DEFAULT_MODEL_CANDIDATES = [
-    r"C:\Users\Dell\Desktop\Python Projects\Facial recognition attendence system\faces\fold1_f48_ep300_4gpu_dice0_9059\fold1_f48_ep300_4gpu_dice0_9059\model.pt",
-]
+# Additional local paths to search for a model checkpoint.
+# Prefer setting NEUROLENS_MODEL_PATH in your .env file instead.
+DEFAULT_MODEL_CANDIDATES: list = []
 
 
 def segment_tumor(

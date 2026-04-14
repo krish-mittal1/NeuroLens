@@ -43,6 +43,7 @@ function Viewer({ tumorMeshUrl, brainMeshUrl }) {
   const loaderRef = useRef(null);
   const brainMaterialsRef = useRef(null);
   const [brainMode, setBrainMode] = useState("solid");
+  const [meshLoading, setMeshLoading] = useState(false);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -172,12 +173,19 @@ function Viewer({ tumorMeshUrl, brainMeshUrl }) {
     };
 
     let cancelled = false;
+    setMeshLoading(true);
     Promise.all([
       loadObj(resolveAssetUrl(tumorMeshUrl), tumorMaterial, tumorRef, 2),
       loadObj(resolveAssetUrl(brainMeshUrl), brainSolid, brainRef, 1),
     ]).then(([tumor]) => {
-      if (!cancelled) frameObject(tumor);
-    }).catch((error) => console.error("Failed to load mesh", error));
+      if (!cancelled) {
+        frameObject(tumor);
+        setMeshLoading(false);
+      }
+    }).catch((error) => {
+      console.error("Failed to load mesh", error);
+      if (!cancelled) setMeshLoading(false);
+    });
 
     return () => { cancelled = true; };
   }, [tumorMeshUrl, brainMeshUrl]);
@@ -202,6 +210,12 @@ function Viewer({ tumorMeshUrl, brainMeshUrl }) {
   return (
     <div className="viewer-wrapper">
       <div className="viewer" ref={mountRef} />
+      {meshLoading && (
+        <div className="viewer-loading-overlay">
+          <span className="spinner" />
+          <span>Loading 3D Mesh...</span>
+        </div>
+      )}
       <div className="viewer-toolbar">
         <button
           className={`toolbar-btn ${brainMode === "solid" ? "active" : ""}`}

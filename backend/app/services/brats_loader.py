@@ -10,10 +10,9 @@ from typing import Dict, List, Optional
 from app.services.dicom_loader import load_nifti
 
 
-BRA_TS_DATASET_ROOT = os.getenv(
-    "NEUROLENS_BRATS_ROOT",
-    r"C:\Users\Dell\Desktop\Python Projects\Facial recognition attendence system\faces\archive (1)\BraTS2020_TrainingData",
-)
+# Set NEUROLENS_BRATS_ROOT in your .env file to point at the folder
+# that contains BraTS20_Training_XXX subdirectories.
+BRA_TS_DATASET_ROOT = os.getenv("NEUROLENS_BRATS_ROOT", "")
 
 MODALITY_SUFFIXES = {
     "flair": ["_flair.nii.gz", "_flair.nii"],

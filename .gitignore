@@ -1,0 +1,60 @@
+# ──────────────────────────────────────────
+# NeuroLens .gitignore
+# ──────────────────────────────────────────
+
+# Environment variables (contains secrets / personal paths)
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# Model weights (large binary files)
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.safetensors
+
+# Generated static assets (meshes created at runtime)
+backend/app/static/tumor_*.obj
+backend/app/static/brain.obj
+backend/app/static/uploads/
+
+# Generated sample data
+backend/sample_data/volume.npy
+backend/sample_data/mask.npy
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/

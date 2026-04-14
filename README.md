@@ -164,7 +164,7 @@ If you don't have an NVIDIA GPU locally, you can validate the model on Colab:
 | `NEUROLENS_MODEL_PATH` | (auto-search) | Path to model.pt checkpoint |
 | `NEUROLENS_MODEL_MODE` | `brats` | `brats` (4-ch) or `single` |
 | `NEUROLENS_MODEL_ARCH` | `swinunetr` | `swinunetr` or `unet` |
-| `BRATS_DATA_ROOT` | (auto-search) | Path to BraTS2020 training data |
+| `NEUROLENS_BRATS_ROOT` | (auto-search) | Path to BraTS2020 training data |
 | `NEUROLENS_SWIN_FEATURE_SIZE` | `48` | SwinUNETR feature dimension |
 | `NEUROLENS_INFER_ROI_Z/Y/X` | `96` | Sliding window ROI size |
 
