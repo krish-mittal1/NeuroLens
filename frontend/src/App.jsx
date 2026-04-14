@@ -49,47 +49,99 @@ function Viewer({ tumorMeshUrl, brainMeshUrl }) {
     const mount = mountRef.current;
     if (!mount) return undefined;
 
+    // ── Scene ────────────────────────────────────────────────────────────
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x111b2e);
+    scene.background = new THREE.Color(0x060c18);
+    scene.fog = new THREE.FogExp2(0x060c18, 0.0012);
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 5000);
+    // ── Camera ───────────────────────────────────────────────────────────
+    const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 5000);
     camera.position.set(0, 70, 140);
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setPixelRatio(window.devicePixelRatio);
+    // ── Renderer (cinematic quality) ─────────────────────────────────────
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      powerPreference: "high-performance",
+    });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.1;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // Enable physically correct lighting
+    renderer.shadowMap.enabled = false;
     mount.appendChild(renderer.domElement);
 
+    // ── Controls (auto-rotate with interaction pause) ─────────────────────
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
+    controls.dampingFactor = 0.06;
+    controls.autoRotate = true;
+    controls.autoRotateSpeed = 0.5;
+    controls.minDistance = 60;
+    controls.maxDistance = 500;
     controls.target.set(0, 0, 0);
     controlsRef.current = controls;
 
-    const ambient = new THREE.AmbientLight(0xffffff, 1.5);
-    const keyLight = new THREE.DirectionalLight(0xaaddff, 2.0);
-    keyLight.position.set(120, 160, 90);
-    const fillLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    fillLight.position.set(-80, 60, 60);
-    const rimLight = new THREE.DirectionalLight(0x7effc3, 1.2);
-    rimLight.position.set(-80, -20, -120);
-    const bottomLight = new THREE.DirectionalLight(0x4488cc, 0.6);
-    bottomLight.position.set(0, -100, 0);
-    scene.add(ambient, keyLight, fillLight, rimLight, bottomLight);
+    // Pause auto-rotation when user grabs the scene, resume after 3 s
+    let resumeTimer = null;
+    const onUserInteract = () => {
+      controls.autoRotate = false;
+      clearTimeout(resumeTimer);
+      resumeTimer = setTimeout(() => { controls.autoRotate = true; }, 3000);
+    };
+    renderer.domElement.addEventListener("pointerdown", onUserInteract);
 
-    loaderRef.current = new OBJLoader();
+    // ── Lighting ─────────────────────────────────────────────────────────
+    // Sky / ground hemisphere light for warm ambient gradient
+    const hemi = new THREE.HemisphereLight(0x1a2a4a, 0x0a0c10, 1.8);
+    scene.add(hemi);
 
+    // Key light (cool blue-white, top-right)
+    const keyLight = new THREE.DirectionalLight(0xc0d8ff, 3.0);
+    keyLight.position.set(120, 180, 90);
+    scene.add(keyLight);
+
+    // Fill light (softer, left)
+    const fillLight = new THREE.DirectionalLight(0x88aaff, 1.0);
+    fillLight.position.set(-100, 60, 60);
+    scene.add(fillLight);
+
+    // Rim / back light (teal, gives glass brain depth)
+    const rimLight = new THREE.DirectionalLight(0x00ffc8, 1.6);
+    rimLight.position.set(-80, -30, -140);
+    scene.add(rimLight);
+
+    // Under-light (blue, illuminates brain from below)
+    const underLight = new THREE.DirectionalLight(0x3366ff, 0.8);
+    underLight.position.set(0, -120, 0);
+    scene.add(underLight);
+
+    // Dynamic tumor glow — point light (will be repositioned after mesh loads)
+    const tumorGlow = new THREE.PointLight(0xff3300, 4.0, 120, 1.5);
+    tumorGlow.position.set(0, 0, 0);
+    scene.add(tumorGlow);
+    // Store so we can reposition it after mesh loads
+    scene._tumorGlow = tumorGlow;
+
+    // ── Resize handler ────────────────────────────────────────────────────
     const resize = () => {
-      const width = mount.clientWidth || 600;
+      const width  = mount.clientWidth  || 600;
       const height = mount.clientHeight || 480;
       renderer.setSize(width, height, false);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
     };
 
+    // ── Render loop ───────────────────────────────────────────────────────
     let frameId = 0;
     const animate = () => {
       controls.update();
+      // Pulse the tumor glow for a living effect
+      const t = performance.now() * 0.001;
+      tumorGlow.intensity = 3.5 + Math.sin(t * 2.0) * 1.0;
       renderer.render(scene, camera);
       frameId = window.requestAnimationFrame(animate);
     };
@@ -98,7 +150,11 @@ function Viewer({ tumorMeshUrl, brainMeshUrl }) {
     animate();
     window.addEventListener("resize", resize);
 
+    loaderRef.current = new OBJLoader();
+
     return () => {
+      clearTimeout(resumeTimer);
+      renderer.domElement.removeEventListener("pointerdown", onUserInteract);
       window.removeEventListener("resize", resize);
       window.cancelAnimationFrame(frameId);
       controls.dispose();
@@ -116,6 +172,45 @@ function Viewer({ tumorMeshUrl, brainMeshUrl }) {
     const loader = loaderRef.current;
     if (!scene || !camera || !controls || !loader) return undefined;
 
+    // ── Materials ─────────────────────────────────────────────────────────
+    // Tumor: shiny organic tissue with clearcoat + emissive glow
+    const tumorMaterial = new THREE.MeshPhysicalMaterial({
+      color: 0xff2222,
+      emissive: 0xff1100,
+      emissiveIntensity: 0.55,
+      roughness: 0.18,
+      metalness: 0.05,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.08,
+      depthWrite: true,
+    });
+
+    // Brain: true glass transmission (NOT just low opacity)
+    const brainSolid = new THREE.MeshPhysicalMaterial({
+      color: 0x99ccff,
+      transparent: true,
+      transmission: 0.72,      // glass-like light transmission
+      ior: 1.38,               // index of refraction (brain ≈ soft tissue)
+      thickness: 18,           // volume depth for refraction
+      roughness: 0.12,
+      metalness: 0.0,
+      reflectivity: 0.25,
+      envMapIntensity: 0.8,
+      opacity: 0.75,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+
+    const brainWireframe = new THREE.MeshBasicMaterial({
+      color: 0x44aaff,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.06,
+      depthWrite: false,
+    });
+    brainMaterialsRef.current = { solid: brainSolid, wireframe: brainWireframe };
+
+    // ── Helpers ───────────────────────────────────────────────────────────
     const applyMaterial = (root, material) => {
       root.traverse((child) => {
         if (child.isMesh) child.material = material;
@@ -144,23 +239,6 @@ function Viewer({ tumorMeshUrl, brainMeshUrl }) {
         );
       });
 
-    const tumorMaterial = new THREE.MeshPhysicalMaterial({
-      color: 0xff5555, transparent: true, opacity: 0.95,
-      roughness: 0.25, metalness: 0.05, emissive: 0x331111, emissiveIntensity: 0.3,
-      depthWrite: true,
-    });
-    const brainSolid = new THREE.MeshPhysicalMaterial({
-      color: 0x88ccff, transparent: true, opacity: 0.18,
-      roughness: 0.3, metalness: 0.1, side: THREE.DoubleSide,
-      emissive: 0x112244, emissiveIntensity: 0.2,
-      depthWrite: false,
-    });
-    const brainWireframe = new THREE.MeshBasicMaterial({
-      color: 0x66ddff, wireframe: true, transparent: true, opacity: 0.08,
-      depthWrite: false,
-    });
-    brainMaterialsRef.current = { solid: brainSolid, wireframe: brainWireframe };
-
     // Frame camera to fit ALL loaded objects (tumor + brain combined bounding box)
     const frameScene = (tumor, brain) => {
       const box = new THREE.Box3();
@@ -170,10 +248,9 @@ function Viewer({ tumorMeshUrl, brainMeshUrl }) {
 
       const size = box.getSize(new THREE.Vector3()).length();
       const center = box.getCenter(new THREE.Vector3());
-      const distance = size * 1.4; // always far enough back to see the full brain
+      const distance = size * 1.4;
 
       controls.target.copy(center);
-      // Position camera at a comfortable 30-degree elevation, front-right view
       camera.position.set(
         center.x + distance * 0.5,
         center.y + distance * 0.4,
@@ -181,6 +258,13 @@ function Viewer({ tumorMeshUrl, brainMeshUrl }) {
       );
       camera.lookAt(center);
       controls.update();
+
+      // Reposition tumor glow to the actual tumor mesh center
+      if (tumor && scene._tumorGlow) {
+        const tumorBox = new THREE.Box3().setFromObject(tumor);
+        const tumorCenter = tumorBox.getCenter(new THREE.Vector3());
+        scene._tumorGlow.position.copy(tumorCenter);
+      }
     };
 
     let cancelled = false;
