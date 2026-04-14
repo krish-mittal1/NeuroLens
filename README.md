@@ -2,7 +2,7 @@
 
 > Turn a brain MRI scan into an interactive 3D surgical planning view — with separate interfaces for patients and doctors.
 
-NeuroLens takes multi-modal MRI data (FLAIR, T1, T1CE, T2), runs it through a pre-trained **SwinUNETR** segmentation model, and produces:
+NeuroLens takes multi-modal MRI data (FLAIR, T1, T1CE, T2), runs it through a 4-level segmentation pipeline (prioritizing a pre-trained **3D Attention-UNet** or **SwinUNETR**), and produces:
 
 - A 3D mesh of the detected tumor overlaid on the brain surface
 - Quantified clinical metrics (volume, depth, laterality, region mapping)
@@ -10,9 +10,9 @@ NeuroLens takes multi-modal MRI data (FLAIR, T1, T1CE, T2), runs it through a pr
 - Two distinct report views — one simplified for patients, one detailed for clinicians
 
 ![3D Viewer](https://img.shields.io/badge/3D_Viewer-Three.js-blue?style=flat-square)
-![Model](https://img.shields.io/badge/Model-SwinUNETR-orange?style=flat-square)
-![Dice](https://img.shields.io/badge/Dice_Score-0.9211-brightgreen?style=flat-square)
-![Dataset](https://img.shields.io/badge/Dataset-BraTS2020-yellow?style=flat-square)
+![Model](https://img.shields.io/badge/Model-Keras%2FTensorFlow-orange?style=flat-square)
+![Dice](https://img.shields.io/badge/Dice_Score-0.9562-brightgreen?style=flat-square)
+![Dataset](https://img.shields.io/badge/Dataset-BraTS2021-yellow?style=flat-square)
 
 ---
 
@@ -34,12 +34,12 @@ Most tumor segmentation tools stop at the mask — they give you a numpy array a
 - Falls back to single-channel replication for regular scans
 - Browse and analyze any of the 369 BraTS2020 training cases directly
 
-### Segmentation
-- **SwinUNETR** (62M parameters) trained on BraTS2020 with 4-channel input
-- Sliding window inference (96³ ROI) with automatic padding
-- Handles multi-GPU checkpoints (strips `module.` prefix automatically)
-- GPU inference ~14 seconds on a T4, CPU fallback available
-- Heuristic intensity-based fallback when no model is configured
+### Segmentation Pipeline
+The platform uses a progressive 4-level inference system to guarantee results in any environment:
+- **Level 1 (Pre-segmented Masks):** Instantly loads `.npy` masks if provided.
+- **Level 2 (3D Attention-UNet):** Uses a TensorFlow/Keras model achieving **0.9562 Dice** on BraTS 2021. Requires a 69MB download.
+- **Level 3 (SwinUNETR):** PyTorch/MONAI fallback (62M parameters, 0.9211 Dice).
+- **Level 4 (Heuristic):** Intensity-based thresholding fallback when no ML models are available.
 
 ### 3D Visualization
 - Full brain surface mesh + tumor mesh rendered with Three.js
@@ -121,45 +121,31 @@ Opens on `http://127.0.0.1:5173`.
 
 ### Model Setup
 
-The `model.pt` checkpoint is **not included in the repository** (model weights are too large for Git).
-The app works in three modes — pick whichever fits your situation:
+NeuroLens uses a flexible multi-level inference system. By default, it runs an intensity-based **heuristic fallback**, which means it works instantly out-of-the-box for hackathon demos.
 
-#### Mode 1 — No model (demo / quick start)
-Skip this step entirely. The app uses a **heuristic intensity-based fallback** segmentation and the built-in synthetic sample data. All UI features work. This is the default when no model is configured.
+However, to use the high-accuracy deep learning models, follow these steps:
 
-#### Mode 2 — Local model file (if you already have `model.pt`)
-```bash
-# Create your .env from the template
-cp backend/.env.example backend/.env
+#### Mode 1 — Keras 3D Attention-UNet (Recommended)
+This model achieves a 0.9562 Dice score and only requires TensorFlow. We've included a script to grab the 69MB weights directly from HuggingFace.
 
-# Edit .env and set your model path
-NEUROLENS_MODEL_PATH=/absolute/path/to/model.pt
-```
-
-#### Mode 3 — Download from GitHub Releases (for repo forks)
-
-**Step 1 — The repo owner uploads the model once:**
-1. Go to the repo → **Releases** → **Draft a new release**
-2. Tag it `v1.0-model`, title it `SwinUNETR Model Checkpoint`
-3. Attach `model.pt` as a release asset
-4. Publish the release
-5. Copy the asset download URL (looks like: `https://github.com/krish-mittal1/NeuroLens/releases/download/v1.0-model/model.pt`)
-6. Set it as the default in `download_model.py` (line ~18): `DEFAULT_MODEL_URL = "<your URL here>"`
-
-**Step 2 — Anyone who forks the repo runs:**
 ```bash
 cd backend
 python download_model.py
-# Model is saved to backend/models/model.pt
-# Add NEUROLENS_MODEL_PATH=./models/model.pt to backend/.env
 ```
+This automatically downloads and extracts the model. It will print an environment variable like:
+`NEUROLENS_KERAS_MODEL_PATH=C:/.../backend/models/3d_attention_unet`
+Add that exact line to your `backend/.env` file.
 
-Or pass a URL directly:
+#### Mode 2 — MONAI SwinUNETR (PyTorch Alternative)
+If you prefer PyTorch and have a `.pt` SwinUNETR checkpoint:
+1. Place the weights somewhere on your disk.
+2. Edit `backend/.env` and set:
 ```bash
-python download_model.py --url https://github.com/krish-mittal1/NeuroLens/releases/download/v1.0-model/model.pt
+NEUROLENS_MODEL_PATH=/absolute/path/to/swinunetr.pt
 ```
 
-> **Note:** The `backend/models/` directory and all `*.pt` files are already in `.gitignore` — the model will never be accidentally committed.
+#### Mode 3 — No Model (Zero Setup)
+Skip all the above. If no environment variables are found, NeuroLens silently falls back to **Level 4 Heuristic Inference** — a fast, algorithmic approximation so the UI and 3D viewer still work perfectly for live demonstrations.
 
 ### BraTS Dataset (optional)
 
@@ -186,26 +172,18 @@ If you don't have an NVIDIA GPU locally, you can validate the model on Colab:
 |---|---|
 | Frontend | React 18, Vite, Three.js |
 | Backend | FastAPI, Uvicorn |
-| Model | MONAI SwinUNETR (PyTorch) |
-| 3D Rendering | Three.js + OBJ meshes |
-| Mesh Generation | scikit-image marching cubes → Trimesh |
-| Medical Imaging | NiBabel, PyDICOM |
-| Dataset | BraTS2020 (369 training cases) |
+| Deep Learning | TensorFlow / Keras / PyTorch (MONAI) |
+| 3D Rendering | Three.js + ACESFilmicToneMapping + Glass shaders |
+| Mesh Generation | scikit-image marching cubes → PyWavefront OBJ |
+| Dataset | BraTS 2021 / 2020 |
 
 ---
-
-## Environment Variables
 
 | Variable | Default | Description |
 |---|---|---|
-| `NEUROLENS_MODEL_PATH` | (auto-search) | Path to model.pt checkpoint |
-| `NEUROLENS_MODEL_MODE` | `brats` | `brats` (4-ch) or `single` |
-| `NEUROLENS_MODEL_ARCH` | `swinunetr` | `swinunetr` or `unet` |
-| `NEUROLENS_BRATS_ROOT` | (auto-search) | Path to BraTS2020 training data |
-| `NEUROLENS_SWIN_FEATURE_SIZE` | `48` | SwinUNETR feature dimension |
-| `NEUROLENS_INFER_ROI_Z/Y/X` | `96` | Sliding window ROI size |
-
----
+| `NEUROLENS_KERAS_MODEL_PATH` | (empty) | Path to extracted 3D Attention-UNet folder |
+| `NEUROLENS_MODEL_PATH` | (empty) | Path to SwinUNETR model.pt checkpoint |
+| `NEUROLENS_BRATS_ROOT` | (empty) | Path to BraTS training data |
 
 ## API Endpoints
 
