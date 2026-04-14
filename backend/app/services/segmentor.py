@@ -42,12 +42,92 @@ def segment_tumor_with_info(
         print(f"[Segmentor] Mask loaded: shape={mask.shape}, tumor voxels={np.sum(mask)}")
         return mask, "presegmented_mask"
 
+    # Level 2: Keras / TensorFlow inference (3D Attention-UNet)
+    keras_mask = _run_keras_inference(volume, modality_volumes=modality_volumes)
+    if keras_mask is not None:
+        return keras_mask, "keras_inference"
+
+    # Level 3: MONAI / PyTorch SwinUNETR inference
     model_mask = _run_monai_inference(volume, modality_volumes=modality_volumes)
     if model_mask is not None:
         return model_mask, "model_inference"
 
     print("[Segmentor] Running heuristic fallback segmentation...")
     return _run_model_inference(volume), "heuristic_fallback"
+
+
+def _run_keras_inference(
+    volume: np.ndarray,
+    modality_volumes: Optional[Dict[str, np.ndarray]] = None,
+) -> Optional[np.ndarray]:
+    """
+    Run inference using the 3D Attention-UNet (TensorFlow/Keras).
+
+    Model: maryann-gitonga/brain-tumor-segmentation-3d-attention-unet
+    - Dice score: 0.9562 on BraTS 2021
+    - Input: 3-channel (T1CE, T2, FLAIR) stacked along last axis → (1, Z, Y, X, 3)
+    - Output: binary segmentation mask (sigmoid > 0.5)
+
+    Activated when NEUROLENS_KERAS_MODEL_PATH points to the extracted SavedModel dir.
+    Download with: python backend/download_model.py
+    """
+    keras_path = os.getenv("NEUROLENS_KERAS_MODEL_PATH", "")
+    if not keras_path or not os.path.exists(keras_path):
+        return None
+
+    try:
+        import tensorflow as tf
+    except ImportError:
+        print("[Segmentor] TensorFlow not installed — skipping Keras inference")
+        return None
+
+    print(f"[Segmentor] Running Keras inference: {keras_path}")
+
+    try:
+        model = tf.keras.models.load_model(keras_path, compile=False)
+    except Exception as exc:
+        print(f"[Segmentor] Failed to load Keras model: {exc}")
+        return None
+
+    # Build 3-channel input: T1CE, T2, FLAIR (order the model was trained with)
+    if modality_volumes and all(k in modality_volumes for k in ("t1ce", "t2", "flair")):
+        channels = [
+            modality_volumes["t1ce"],
+            modality_volumes["t2"],
+            modality_volumes["flair"],
+        ]
+        print("[Segmentor] Using T1CE + T2 + FLAIR channels for Keras inference")
+    else:
+        # Replicate single-channel volume across all 3 channels
+        print("[Segmentor] Single-channel input — replicating to 3 channels for Keras model")
+        channels = [volume, volume, volume]
+
+    # Normalize each channel independently (foreground z-score)
+    def _znorm(arr):
+        arr = arr.astype(np.float32)
+        fg = arr > 0
+        if np.any(fg):
+            mu, sigma = arr[fg].mean(), arr[fg].std()
+            if sigma > 0:
+                arr[fg] = (arr[fg] - mu) / sigma
+        return arr
+
+    channels = [_znorm(c) for c in channels]
+
+    # Stack to (Z, Y, X, 3) then add batch dim → (1, Z, Y, X, 3)
+    x = np.stack(channels, axis=-1)
+    x = np.expand_dims(x, 0).astype(np.float32)
+
+    try:
+        pred = model.predict(x, verbose=0)          # (1, Z, Y, X, C)
+        # Use first output channel; sigmoid already applied by model output layer
+        output = pred[0, ..., 0] if pred.ndim == 5 else pred[0]
+        mask = (output > 0.5).astype(np.uint8)
+        print(f"[Segmentor] Keras inference complete: tumor voxels={np.sum(mask)}")
+        return mask
+    except Exception as exc:
+        print(f"[Segmentor] Keras inference error: {exc}")
+        return None
 
 
 def _run_model_inference(volume: np.ndarray) -> np.ndarray:
