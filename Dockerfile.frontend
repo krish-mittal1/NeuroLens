@@ -24,9 +24,8 @@ RUN bun run build
 # Final Stage
 # -----------------
 FROM nginx:1.27-alpine
-LABEL name="UrjaLink" \
-    description="UrjaLink Frontend" \
-    url="https://github.com/anushkayadav0901/URJALink"
+LABEL name="neurolens" \
+    description="neurolens Frontend"
 
 # Remove default nginx content
 RUN rm -rf /usr/share/nginx/html/*

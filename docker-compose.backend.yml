@@ -1,9 +1,9 @@
 services:
-    urjalink-backend:
+    neurolens-backend:
         build:
-            context: .
-            dockerfile: Dockerfile.backend
-        container_name: urjalink-backend
+            context: ./backend
+            dockerfile: ../Dockerfile.backend
+        container_name: neurolens-backend
         restart: unless-stopped
         ports:
             - "8080:8080"

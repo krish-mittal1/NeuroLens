@@ -20,9 +20,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Final Stage
 # -----------------
 FROM python:3.13-slim
-LABEL name="UrjaLink" \
-    description="UrjaLink Backend" \
-    url="https://github.com/anushkayadav0901/URJALink"
+LABEL name="neurolens" \
+    description="neurolens Backend"
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
@@ -34,4 +33,4 @@ COPY . /app
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-CMD ["fastapi", "run", "main.py", "--port", "8080", "--host", "0.0.0.0"]
+CMD ["fastapi", "run", "app/main.py", "--port", "8080", "--host", "0.0.0.0"]

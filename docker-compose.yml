@@ -1,20 +1,24 @@
 services:
-    urjalink-backend:
-        extends:
-            file: ./docker-compose.backend.yml
-            service: urjalink-backend
-        profiles:
-            - all
-            - backend
+  neurolens-backend:
+    extends:
+      file: ./docker-compose.backend.yml
+      service: neurolens-backend
+    profiles:
+      - all
+      - backend
+    networks:
+      - tunnel-net
 
-    urjalink-frontend:
-        extends:
-            file: ./docker-compose.frontend.yml
-            service: urjalink-frontend
-        profiles:
-            - all
-            - frontend
+  neurolens-frontend:
+    extends:
+      file: ./docker-compose.frontend.yml
+      service: neurolens-frontend
+    profiles:
+      - all
+      - frontend
+    networks:
+      - tunnel-net
 
 networks:
-    urjalink-net:
-        driver: bridge
+  tunnel-net:
+    driver: bridge
