@@ -1,0 +1,42 @@
+# -----------------
+# Builder Stage
+# -----------------
+FROM oven/bun:1.3 AS builder
+
+WORKDIR /app
+
+# Install dependencies first (better layer caching)
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
+
+# Accept build-time env vars (Vite bakes these into the JS bundle)
+ARG VITE_GOOGLE_MAPS_API_KEY
+ARG VITE_API_BASE_URL
+
+ENV VITE_GOOGLE_MAPS_API_KEY=$VITE_GOOGLE_MAPS_API_KEY
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+
+# Copy source and build
+COPY . .
+RUN bun run build
+
+# -----------------
+# Final Stage
+# -----------------
+FROM nginx:1.27-alpine
+LABEL name="UrjaLink" \
+    description="UrjaLink Frontend" \
+    url="https://github.com/anushkayadav0901/URJALink"
+
+# Remove default nginx content
+RUN rm -rf /usr/share/nginx/html/*
+
+# Copy built assets
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Custom nginx config for SPA routing
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
