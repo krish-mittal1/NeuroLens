@@ -6,6 +6,7 @@ Converts MRI scans into interactive 3D visualizations with structured clinical i
 """
 
 import os
+import uvicorn
 
 # Load .env file if present (must happen before any os.getenv calls)
 try:
@@ -19,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.routes.analyze import router as analyze_router
+from app.routes.reports import router as reports_router
 
 # Create FastAPI app
 app = FastAPI(
@@ -43,6 +45,7 @@ app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 # Register routes
 app.include_router(analyze_router, prefix="/api", tags=["Analysis"])
+app.include_router(reports_router, prefix="/api/reports", tags=["Reports"])
 
 
 @app.get("/")
@@ -70,3 +73,8 @@ async def health_check():
         "status": "healthy",
         "sample_data_ready": sample_data_exists,
     }
+
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)

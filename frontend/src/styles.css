@@ -2217,3 +2217,40 @@ body {
     bottom: 20px;
   }
 }
+
+/* ═══════════════════════════════════════════════════
+   LANDING PAGE INTERACTIVE FEATURES — RESPONSIVE
+═══════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  /* Risk Estimator */
+  section > div[style*="grid-template-columns: 1fr 1fr"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* MRI Viewer */
+  section > div > div[style*="grid-template-columns: 1fr 380px"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Anatomy Explorer */
+  section > div > div[style*="grid-template-columns: 1fr 1fr"][style*="gap: 40px"] {
+    grid-template-columns: 1fr !important;
+    gap: 24px !important;
+  }
+
+  /* Chat Panel */
+  .ai-chat-panel {
+    width: calc(100vw - 32px);
+    right: 16px;
+    bottom: 84px;
+    max-height: 70vh;
+  }
+
+  .ai-chat-trigger {
+    right: 16px;
+    bottom: 20px;
+    width: 52px;
+    height: 52px;
+  }
+}

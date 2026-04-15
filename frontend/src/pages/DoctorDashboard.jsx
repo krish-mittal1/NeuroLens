@@ -3,6 +3,8 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { useApp } from "../AppContext";
 import Viewer from "../components/Viewer";
 import SliceViewer from "../components/SliceViewer";
+import ValidationModal from "../components/ValidationModal";
+import PatientReport from "../components/PatientReport";
 
 /* ── Gemini API ── */
 const GEMINI_API_KEY = "AIzaSyCZd8tEkKsoZdlBNwAjwtQClVPiDZxMGOY";
