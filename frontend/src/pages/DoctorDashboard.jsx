@@ -4,6 +4,80 @@ import { useApp } from "../AppContext";
 import Viewer from "../components/Viewer";
 import SliceViewer from "../components/SliceViewer";
 
+/* ── Gemini API ── */
+const GEMINI_API_KEY = "AIzaSyCZd8tEkKsoZdlBNwAjwtQClVPiDZxMGOY";
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+
+function buildScanContext(result) {
+  const s = result.summary || {};
+  const m = result.metrics || {};
+  const p = result.pipeline || {};
+  const r = result.reasoning || [];
+  return `You are NeuroLens AI — a strictly scoped medical assistant embedded in the NeuroLens brain MRI analysis platform.
+
+STRICT RULES — FOLLOW WITHOUT EXCEPTION:
+1. Only answer questions directly related to: brain MRI scans, brain tumor segmentation, and the specific scan report below.
+2. If the user asks ANYTHING outside MRI/neurology/this report, respond ONLY with: "I can only assist with questions about brain MRI scans and this scan report."
+3. Do NOT volunteer extra information beyond what is asked.
+4. Do NOT fabricate values or conclusions not present in the report data.
+5. Do NOT give treatment plans or medication recommendations.
+6. Always recommend consulting a certified specialist for clinical decisions.
+7. Keep answers concise and strictly on-topic.
+
+=== SCAN REPORT ===
+SUMMARY:
+- Region: ${s.region || "N/A"}
+- Volume: ${s.volume || "N/A"}
+- Dimensions: ${s.dimensions || "N/A"}
+- Laterality: ${s.laterality || "N/A"}
+- Depth from surface: ${s.depth || "N/A"}
+- Risk Level: ${s.risk_level || "N/A"}
+
+CLINICAL METRICS:
+- Tumor volume (cm³): ${m.tumor_volume_cm3 ?? "N/A"}
+- Region function: ${m.region_function || "N/A"}
+- Midline distance: ${m.midline_distance_mm ?? "N/A"} mm
+- Centroid voxel: ${(m.centroid_voxel || []).join(", ") || "N/A"}
+- Risk factors: ${(m.risk_factors || []).join(", ") || "none"}
+
+PIPELINE:
+- Segmentation mode: ${p.segmentation_mode || "N/A"}
+- Voxel spacing: ${(p.voxel_spacing_mm || []).join(" × ") || "N/A"} mm
+
+CLINICAL REASONING:
+${r.map((step) => `Step ${step.step} - ${step.title} (${step.confidence}): ${step.detail}`).join("\n") || "No reasoning steps available."}
+=== END OF REPORT ===
+
+Answer only what is asked. Do not add unsolicited information.`;
+}
+
+async function askGemini(messages, systemContext) {
+  // Only send real conversation turns — skip initial hardcoded UI messages
+  const realMessages = messages.filter((m) => !m.initial);
+  const contents = realMessages.map((m) => ({
+    role: m.role === "ai" ? "model" : "user",
+    parts: [{ text: m.text }],
+  }));
+  // Gemini needs at least 1 user message
+  if (!contents.some((c) => c.role === "user")) return "Please ask a question about the scan report.";
+  const body = {
+    system_instruction: { parts: [{ text: systemContext }] },
+    contents,
+    generationConfig: { temperature: 0.2, maxOutputTokens: 800 },
+  };
+  const res = await fetch(GEMINI_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err?.error?.message || "Gemini API error");
+  }
+  const data = await res.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || "I couldn't generate a response. Please try again.";
+}
+
 /* ── Upload Tab ─────────────────────────────────────── */
 function UploadTab() {
   const navigate = useNavigate();
@@ -164,15 +238,6 @@ function UploadTab() {
   );
 }
 
-/* ── Mock AI responses ── */
-const MOCK_RESPONSES = [
-  "Based on the segmentation, the tumor appears to be a high-grade glioma with irregular margins.",
-  "The tumor's proximity to the motor cortex suggests careful surgical planning is needed to preserve motor function.",
-  "Volumetric analysis indicates the tumor has a significant mass effect on surrounding structures.",
-  "I recommend reviewing the coronal slices for better visualization of the inferior tumor boundary.",
-  "The enhancing component suggests active tumor growth. Consider contrast-enhanced follow-up imaging.",
-];
-
 /* ── Results Tab (3D Viewer + AI Chat) ──────────────── */
 function ResultsTab() {
   const { result } = useApp();
@@ -182,26 +247,34 @@ function ResultsTab() {
 
   const [viewMode, setViewMode] = useState("3d");
   const [chatMessages, setChatMessages] = useState([
-    { role: "ai", text: `Tumor detected in ${s?.region || "brain region"}. Volume: ${s?.volume || "N/A"}.` },
-    { role: "ai", text: `Laterality: ${s?.laterality || "N/A"}. Risk level assessed as ${s?.risk_level || "N/A"}.` },
-    { role: "ai", text: "Surgical planning should consider surrounding tissue and nearby functional areas." },
+    { role: "ai", text: `Tumor detected in ${s?.region || "brain region"}. Volume: ${s?.volume || "N/A"}.`, initial: true },
+    { role: "ai", text: `Laterality: ${s?.laterality || "N/A"}. Risk level assessed as ${s?.risk_level || "N/A"}.`, initial: true },
+    { role: "ai", text: "Ask me anything about this scan report.", initial: true },
   ]);
   const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
   const chatEndRef = useRef(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const msg = chatInput.trim();
-    if (!msg) return;
-    setChatMessages((prev) => [
-      ...prev,
-      { role: "user", text: msg },
-      { role: "ai", text: MOCK_RESPONSES[Math.floor(Math.random() * MOCK_RESPONSES.length)] },
-    ]);
+    if (!msg || chatLoading) return;
+    const newMessages = [...chatMessages, { role: "user", text: msg }];
+    setChatMessages(newMessages);
     setChatInput("");
+    setChatLoading(true);
+    try {
+      const systemContext = buildScanContext(result);
+      const aiText = await askGemini(newMessages, systemContext);
+      setChatMessages((prev) => [...prev, { role: "ai", text: aiText }]);
+    } catch (err) {
+      setChatMessages((prev) => [...prev, { role: "ai", text: `⚠️ ${err.message}` }]);
+    } finally {
+      setChatLoading(false);
+    }
   };
 
   const handleKeyDown = (e) => {
@@ -288,6 +361,16 @@ function ResultsTab() {
                 <div className="dd-chat-bubble">{msg.text}</div>
               </div>
             ))}
+            {chatLoading && (
+              <div className="dd-chat-msg dd-chat-ai">
+                <div className="dd-chat-avatar">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                </div>
+                <div className="dd-chat-bubble dd-chat-typing">
+                  <span /><span /><span />
+                </div>
+              </div>
+            )}
             <div ref={chatEndRef} />
           </div>
 
@@ -295,13 +378,17 @@ function ResultsTab() {
             <input
               type="text"
               className="dd-chat-input"
-              placeholder="Ask about this analysis..."
+              placeholder="Ask about this scan report..."
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
               onKeyDown={handleKeyDown}
+              disabled={chatLoading}
             />
-            <button className="dd-chat-send" onClick={handleSend} disabled={!chatInput.trim()}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            <button className="dd-chat-send" onClick={handleSend} disabled={!chatInput.trim() || chatLoading}>
+              {chatLoading
+                ? <span className="spinner" style={{ width: 14, height: 14 }} />
+                : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              }
             </button>
           </div>
         </div>
